@@ -9,6 +9,7 @@
     <None Include="paket.references" />
     <Compile Include="TsebtConfig.fs" />
     <Compile Include="Bootstrap.fs" />
+    <Compile Include="TemplateCatalog.fs" />
     <Compile Include="SqliteInit.fs" />
     <Compile Include="Server.fs" />
     <Content Update="appsettings.Development.json">

@@ -33,9 +33,15 @@ let private loadSettings () : Result<TsebtConfig.TsebtSettings, string> =
 let private getAppConfigHandler () : Async<Result<AppConfigView, string>> =
     async { return loadSettings () |> Result.map toAppConfigView }
 
-/// Returns template metadata placeholders until real template scanning is implemented.
+/// Returns template file metadata from the configured templates root.
 let private getTemplateFilesHandler () : Async<Result<TemplateFileInfo list, string>> =
-    async { return Ok [] }
+    async {
+        return
+            result {
+                let! settings = loadSettings ()
+                return! TemplateCatalog.listTemplateFiles settings
+            }
+    }
 
 /// Returns a deterministic preview placeholder until real stitching is implemented.
 let private previewGenerateHandler (request: GeneratePreviewRequest) : Async<Result<GeneratePreviewResult, string>> =
