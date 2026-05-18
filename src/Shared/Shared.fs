@@ -12,8 +12,8 @@ type TemplateFileInfo = {
 
 type GeneratePreviewRequest = {
     SelectedTemplatePaths: string list
-    NodeDigit: string
-    PhaseSpaceIndex: string
+    SelectedNodeDigits: string list
+    SelectedPhaseSpaceIndexes: string list
 }
 
 type GeneratePreviewResult = {
@@ -22,6 +22,7 @@ type GeneratePreviewResult = {
     InputFileName: string
     OutputFilePath: string
     StitchedPreviewText: string
+    ExpectedGeneratedCount: int
 }
 
 type GenerateRequest = {

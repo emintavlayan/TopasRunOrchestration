@@ -109,11 +109,11 @@ let firstSelectedPhaseSpaceIndex (generate: GenerateModel) : string option =
 /// Builds a preview request from current wizard selection.
 let buildPreviewRequest (generate: GenerateModel) : Result<GeneratePreviewRequest, string> =
     match firstSelectedNode generate, firstSelectedPhaseSpaceIndex generate with
-    | Some nodeDigit, Some phaseSpaceIndex ->
+    | Some _, Some _ ->
         Ok {
             SelectedTemplatePaths = generate.SelectedComponents |> Seq.sort |> List.ofSeq
-            NodeDigit = nodeDigit
-            PhaseSpaceIndex = phaseSpaceIndex
+            SelectedNodeDigits = generate.SelectedNodes |> Seq.sort |> List.ofSeq
+            SelectedPhaseSpaceIndexes = generate.SelectedPhaseSpaceFiles |> Seq.sort |> List.ofSeq
         }
     | _ -> Error "Select at least one node and one phase-space file before preview."
 
@@ -455,9 +455,17 @@ let viewReview (generate: GenerateModel) =
         | NotStarted -> Html.p "No preview available."
         | Loading _ -> Html.p "Loading preview..."
         | Loaded preview ->
-            Html.pre [
-                prop.className "mt-2 max-h-72 overflow-auto rounded bg-slate-100 p-3 text-xs"
-                prop.text preview.StitchedPreviewText
+            Html.div [
+                prop.children [
+                    Html.p [
+                        prop.className "mt-2 text-sm"
+                        prop.text $"Expected generated count: {preview.ExpectedGeneratedCount}"
+                    ]
+                    Html.pre [
+                        prop.className "mt-2 max-h-72 overflow-auto rounded bg-slate-100 p-3 text-xs"
+                        prop.text preview.StitchedPreviewText
+                    ]
+                ]
             ]
         | Loading (Some preview) ->
             Html.pre [

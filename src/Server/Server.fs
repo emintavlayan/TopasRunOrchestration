@@ -43,18 +43,13 @@ let private getTemplateFilesHandler () : Async<Result<TemplateFileInfo list, str
             }
     }
 
-/// Returns a deterministic preview placeholder until real stitching is implemented.
+/// Returns a real generate preview using selected templates and configuration placeholders.
 let private previewGenerateHandler (request: GeneratePreviewRequest) : Async<Result<GeneratePreviewResult, string>> =
     async {
-        let runId = $"phsp{request.PhaseSpaceIndex}_seedpreview{request.NodeDigit}"
-
         return
-            Ok {
-                RunId = runId
-                Seed = $"preview{request.NodeDigit}"
-                InputFileName = $"input_preview_ps{request.PhaseSpaceIndex}_n{request.NodeDigit}.txt"
-                OutputFilePath = $"runs/{runId}/dose"
-                StitchedPreviewText = "# Preview stub. Real stitching not implemented yet."
+            result {
+                let! settings = loadSettings ()
+                return! GeneratePreview.createPreview settings request
             }
     }
 
