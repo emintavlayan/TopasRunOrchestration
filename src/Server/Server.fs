@@ -9,10 +9,10 @@ open Giraffe
 open Shared
 
 /// Builds AppConfigView from Tsebt settings.
-let private toAppConfigView (settings: TsebtConfig.TsebtSettings) : AppConfigView =
+let private toAppConfigView (settings: TsebtConfig.TsebtSettings) (seedBase: string) : AppConfigView =
     {
         AppRoot = settings.AppRoot
-        SeedBase = settings.Seed.CurrentBase
+        SeedBase = seedBase
         Nodes = settings.Nodes |> List.map (fun node -> { Name = node.Name; Digit = node.Digit })
         PhaseSpaceFiles = settings.PhaseSpaceFiles |> List.map (fun file -> { Index = file.Index; Value = file.Value })
         Placeholders =
@@ -29,9 +29,23 @@ let buildConfiguration () : IConfiguration =
 let private loadSettings () : Result<TsebtConfig.TsebtSettings, string> =
     buildConfiguration () |> TsebtConfig.load
 
+/// Loads Tsebt settings and resolves the runtime next seed base.
+let private loadSettingsWithNextSeedBase () : Result<TsebtConfig.TsebtSettings * string, string> =
+    result {
+        let! settings = loadSettings ()
+        let! seedBase = SeedBaseStore.getNextSeedBase settings
+        return settings, seedBase
+    }
+
 /// Returns configured app info for the generate flow.
 let private getAppConfigHandler () : Async<Result<AppConfigView, string>> =
-    async { return loadSettings () |> Result.map toAppConfigView }
+    async {
+        return
+            result {
+                let! settings, seedBase = loadSettingsWithNextSeedBase ()
+                return toAppConfigView settings seedBase
+            }
+    }
 
 /// Returns template file metadata from the configured templates root.
 let private getTemplateFilesHandler () : Async<Result<TemplateFileInfo list, string>> =
@@ -48,8 +62,8 @@ let private previewGenerateHandler (request: GeneratePreviewRequest) : Async<Res
     async {
         return
             result {
-                let! settings = loadSettings ()
-                return! GeneratePreview.createPreview settings request
+                let! settings, seedBase = loadSettingsWithNextSeedBase ()
+                return! GeneratePreview.createPreview settings seedBase request
             }
     }
 
@@ -58,8 +72,8 @@ let private generateHandler (request: GenerateRequest) : Async<Result<GenerateRe
     async {
         return
             result {
-                let! settings = loadSettings ()
-                return! GenerateOperation.generate settings request
+                let! settings, seedBase = loadSettingsWithNextSeedBase ()
+                return! GenerateOperation.generate settings seedBase request
             }
     }
 

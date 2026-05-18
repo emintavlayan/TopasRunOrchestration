@@ -126,7 +126,7 @@ let private writeGeneratedInput (settings: TsebtSettings) (seedBase: string) (st
         Error $"Failed generating input file: {ex.Message}"
 
 /// Executes real generate and persists generated metadata in SQLite.
-let generate (settings: TsebtSettings) (request: GenerateRequest) : Result<GenerateResult, string> =
+let generate (settings: TsebtSettings) (seedBase: string) (request: GenerateRequest) : Result<GenerateResult, string> =
     result {
         let templatesRoot = combineAppRoot settings.AppRoot settings.Paths.Templates
         let! stitchedTemplateText = readAndStitchTemplates templatesRoot request.SelectedTemplatePaths
@@ -138,7 +138,7 @@ let generate (settings: TsebtSettings) (request: GenerateRequest) : Result<Gener
             selectedPhaseSpaces
             |> List.collect (fun phaseSpace ->
                 selectedNodes
-                |> List.map (fun node -> writeGeneratedInput settings settings.Seed.CurrentBase stitchedTemplateText node phaseSpace))
+                |> List.map (fun node -> writeGeneratedInput settings seedBase stitchedTemplateText node phaseSpace))
             |> List.sequenceResultM
 
         let! generatedRuns = generatedRunsResult
@@ -148,7 +148,7 @@ let generate (settings: TsebtSettings) (request: GenerateRequest) : Result<Gener
         connectionStringBuilder.DataSource <- databasePath
         use connection = new SqliteConnection(connectionStringBuilder.ConnectionString)
         connection.Open()
-        let! batchId = insertBatch connection settings.Seed.CurrentBase
+        let! batchId = insertBatch connection seedBase
 
         do!
             generatedRuns
@@ -169,10 +169,10 @@ let generate (settings: TsebtSettings) (request: GenerateRequest) : Result<Gener
             |> List.sequenceResultM
             |> Result.map ignore
 
-        let inputFolder = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, settings.Seed.CurrentBase))
+        let inputFolder = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
 
         return {
-            SeedBase = settings.Seed.CurrentBase
+            SeedBase = seedBase
             GeneratedInputCount = generatedRuns.Length
             NodeCount = selectedNodes.Length
             PhaseSpaceCount = selectedPhaseSpaces.Length

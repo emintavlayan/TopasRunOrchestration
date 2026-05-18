@@ -9,6 +9,7 @@
     <None Include="paket.references" />
     <Compile Include="TsebtConfig.fs" />
     <Compile Include="Bootstrap.fs" />
+    <Compile Include="SeedBaseStore.fs" />
     <Compile Include="TemplateCatalog.fs" />
     <Compile Include="GeneratePreview.fs" />
     <Compile Include="GenerateOperation.fs" />

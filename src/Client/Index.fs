@@ -272,7 +272,7 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                                 Error = None
                         }
                 },
-                Cmd.none
+                Cmd.ofMsg (LoadAppConfig(Start()))
             | Error errorMessage ->
                 { model with Generate = { model.Generate with Error = Some errorMessage } }, Cmd.none
 
@@ -442,17 +442,56 @@ let viewPhaseSpaceFiles (generate: GenerateModel) (dispatch: Msg -> unit) =
 
 /// Renders the review step.
 let viewReview (generate: GenerateModel) =
-    let selectedComponents = generate.SelectedComponents |> Seq.sort |> String.concat ", "
+    let selectedComponents = generate.SelectedComponents |> Seq.sort |> List.ofSeq
     let selectedNodes = generate.SelectedNodes |> Seq.sort |> Seq.map (fun digit -> $"n{digit}") |> String.concat ", "
     let selectedPhaseSpaces = generate.SelectedPhaseSpaceFiles |> Seq.sort |> Seq.map (fun index -> $"ps{index}") |> String.concat ", "
 
     Html.div [
-        Html.p [ prop.text $"Selected components: {selectedComponents}" ]
-        Html.p [ prop.className "mt-1"; prop.text $"Selected nodes: {selectedNodes}" ]
-        Html.p [ prop.className "mt-1"; prop.text $"Selected phase-space files: {selectedPhaseSpaces}" ]
+        Html.h3 [ prop.className "text-lg font-semibold"; prop.text "Generate Wizard: Review" ]
+        Html.div [
+            prop.className "mt-3"
+            prop.children [
+                Html.p [ prop.className "font-medium"; prop.text "Selected components:" ]
+                if selectedComponents.IsEmpty then
+                    Html.p [ prop.className "mt-1 text-sm text-slate-600"; prop.text "No components selected." ]
+                else
+                    Html.ul [
+                        prop.className "mt-1 list-disc pl-6"
+                        prop.children [
+                            for componentPath in selectedComponents do
+                                Html.li componentPath
+                        ]
+                    ]
+            ]
+        ]
+        Html.div [
+            prop.className "mt-4"
+            prop.children [
+                Html.p [ prop.className "font-medium"; prop.text "Selected nodes:" ]
+                Html.ul [
+                    prop.className "mt-1 list-disc pl-6"
+                    prop.children [ Html.li selectedNodes ]
+                ]
+            ]
+        ]
+        Html.div [
+            prop.className "mt-4"
+            prop.children [
+                Html.p [ prop.className "font-medium"; prop.text "Selected phase-space files:" ]
+                Html.ul [
+                    prop.className "mt-1 list-disc pl-6"
+                    prop.children [ Html.li selectedPhaseSpaces ]
+                ]
+            ]
+        ]
         Html.h4 [ prop.className "mt-4 font-semibold"; prop.text "Preview" ]
         match generate.Preview with
         | NotStarted -> Html.p "No preview available."
+        | Loading (Some preview) ->
+            Html.pre [
+                prop.className "mt-2 max-h-72 overflow-auto rounded bg-slate-100 p-3 text-xs"
+                prop.text preview.StitchedPreviewText
+            ]
         | Loading _ -> Html.p "Loading preview..."
         | Loaded preview ->
             Html.div [
@@ -466,11 +505,6 @@ let viewReview (generate: GenerateModel) =
                         prop.text preview.StitchedPreviewText
                     ]
                 ]
-            ]
-        | Loading (Some preview) ->
-            Html.pre [
-                prop.className "mt-2 max-h-72 overflow-auto rounded bg-slate-100 p-3 text-xs"
-                prop.text preview.StitchedPreviewText
             ]
     ]
 

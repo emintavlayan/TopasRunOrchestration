@@ -51,7 +51,7 @@ let private firstSelected (name: string) (values: string list) : Result<string, 
     values |> List.tryHead |> Result.requireSome $"At least one {name} must be selected."
 
 /// Builds a real preview result from selected templates, nodes, and phase-space files.
-let createPreview (settings: TsebtSettings) (request: GeneratePreviewRequest) : Result<GeneratePreviewResult, string> =
+let createPreview (settings: TsebtSettings) (seedBase: string) (request: GeneratePreviewRequest) : Result<GeneratePreviewResult, string> =
     result {
         let! firstNodeDigit = firstSelected "node" request.SelectedNodeDigits
         let! firstPhaseSpaceIndex = firstSelected "phase-space file" request.SelectedPhaseSpaceIndexes
@@ -61,7 +61,7 @@ let createPreview (settings: TsebtSettings) (request: GeneratePreviewRequest) : 
         let templatesRoot = combineAppRoot settings.AppRoot settings.Paths.Templates
         let! stitchedTemplateText = readAndStitchTemplates templatesRoot request.SelectedTemplatePaths
 
-        let seed = $"{settings.Seed.CurrentBase}{node.Digit}"
+        let seed = $"{seedBase}{node.Digit}"
         let runId = buildRunId phaseSpaceFile.Index seed
         let outputFilePath = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId, "dose"))
 
@@ -82,4 +82,3 @@ let createPreview (settings: TsebtSettings) (request: GeneratePreviewRequest) : 
             ExpectedGeneratedCount = expectedGeneratedCount
         }
     }
-
