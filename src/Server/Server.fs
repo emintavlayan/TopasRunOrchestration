@@ -53,19 +53,13 @@ let private previewGenerateHandler (request: GeneratePreviewRequest) : Async<Res
             }
     }
 
-/// Returns a generation summary placeholder until real generation is implemented.
+/// Executes real generation and returns persisted generated run metadata.
 let private generateHandler (request: GenerateRequest) : Async<Result<GenerateResult, string>> =
     async {
-        let generatedCount = request.SelectedNodeDigits.Length * request.SelectedPhaseSpaceIndexes.Length
-
         return
-            Ok {
-                SeedBase = "preview"
-                GeneratedInputCount = generatedCount
-                NodeCount = request.SelectedNodeDigits.Length
-                PhaseSpaceCount = request.SelectedPhaseSpaceIndexes.Length
-                InputFolder = "inputs/preview"
-                GeneratedRuns = []
+            result {
+                let! settings = loadSettings ()
+                return! GenerateOperation.generate settings request
             }
     }
 
