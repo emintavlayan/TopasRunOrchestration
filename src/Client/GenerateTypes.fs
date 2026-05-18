@@ -3,11 +3,13 @@ module GenerateTypes
 open SAFE
 open Shared
 
+/// Represents the available top-level pages in the client.
 type Page =
     | Generate
     | Run
     | Collect
 
+/// Represents the steps in the generate wizard flow.
 type GenerateStep =
     | Welcome
     | SelectComponents
@@ -16,6 +18,7 @@ type GenerateStep =
     | Review
     | Result
 
+/// Represents the state of the generate wizard.
 type GenerateModel = {
     Step: GenerateStep
     Config: RemoteData<AppConfigView>
@@ -28,11 +31,13 @@ type GenerateModel = {
     Error: string option
 }
 
+/// Represents the root client model.
 type Model = {
     SelectedPage: Page
     Generate: GenerateModel
 }
 
+/// Represents messages that can update the client model.
 type Msg =
     | SelectPage of Page
     | LoadAppConfig of ApiCall<unit, Result<AppConfigView, string>>

@@ -6,10 +6,15 @@ open GenerateTypes
 open SAFE
 open Shared
 
+/// Represents the page type used by the Index module.
 type Page = GenerateTypes.Page
+/// Represents the generate step type used by the Index module.
 type GenerateStep = GenerateTypes.GenerateStep
+/// Represents the generate model type used by the Index module.
 type GenerateModel = GenerateTypes.GenerateModel
+/// Represents the root model type used by the Index module.
 type Model = GenerateTypes.Model
+/// Represents the message type used by the Index module.
 type Msg = GenerateTypes.Msg
 
 let Generate = GenerateTypes.Page.Generate
