@@ -62,6 +62,33 @@ let private readPhaseSpaceFiles (cfg: IConfiguration) : Result<TsebtPhaseSpaceFi
     |> Seq.toList
     |> List.sequenceResultM
 
+/// Validates that a configured list contains at least one item.
+let private validateNonEmptyList (name: string) (items: 'T list) : Result<'T list, string> =
+    if List.isEmpty items then
+        Error $"Configuration list '{name}' must not be empty"
+    else
+        Ok items
+
+/// Validates that projected values are unique for a configured list.
+let private validateUniqueBy (name: string) (selector: 'T -> string) (items: 'T list) : Result<'T list, string> =
+    let duplicates =
+        items
+        |> List.countBy selector
+        |> List.filter (fun (_, count) -> count > 1)
+        |> List.map fst
+
+    match duplicates with
+    | [] -> Ok items
+    | xs ->
+        let joined = String.Join(", ", xs)
+        Error $"Configuration '{name}' contains duplicate values: {joined}"
+
+/// Validates that the configured seed base is numeric.
+let private validateNumericSeedBase (seedBase: string) : Result<string, string> =
+    match Int64.TryParse seedBase with
+    | true, _ -> Ok seedBase
+    | false, _ -> Error $"Configuration 'Tsebt:Seed:CurrentBase' must be numeric but was '{seedBase}'"
+
 /// Loads Tsebt settings from application configuration.
 let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
     let! appRoot = requireValue cfg "Tsebt:AppRoot"
@@ -76,6 +103,11 @@ let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
     let! currentSeedBase = requireValue cfg "Tsebt:Seed:CurrentBase"
     let! nodes = readNodes cfg
     let! phaseSpaceFiles = readPhaseSpaceFiles cfg
+    let! _ = validateNonEmptyList "Tsebt:Nodes" nodes
+    let! _ = validateNonEmptyList "Tsebt:PhaseSpaceFiles" phaseSpaceFiles
+    let! _ = validateUniqueBy "Tsebt:Nodes:Digit" (fun node -> node.Digit) nodes
+    let! _ = validateUniqueBy "Tsebt:PhaseSpaceFiles:Index" (fun file -> file.Index) phaseSpaceFiles
+    let! _ = validateNumericSeedBase currentSeedBase
 
     return {
         AppRoot = appRoot

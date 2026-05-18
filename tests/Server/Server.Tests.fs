@@ -10,6 +10,33 @@ open TsebtConfig
 open SqliteInit
 open System
 open System.IO
+open Microsoft.Extensions.Configuration
+
+/// Builds a minimal valid in-memory configuration for TSEBT settings tests.
+let private buildValidConfig () =
+    let values =
+        dict [
+            "Tsebt:AppRoot", @"C:\app-root"
+            "Tsebt:Paths:Templates", "templates"
+            "Tsebt:Paths:Inputs", "inputs"
+            "Tsebt:Paths:Runs", "runs"
+            "Tsebt:Paths:Database", "database\\app.db"
+            "Tsebt:Paths:Logs", "logs"
+            "Tsebt:Placeholders:PhaseSpaceFile", "__PHSP_FILE__"
+            "Tsebt:Placeholders:OutputFile", "__OUTPUT_FILE__"
+            "Tsebt:Placeholders:Seed", "__SEED__"
+            "Tsebt:Seed:CurrentBase", "1001"
+            "Tsebt:Nodes:0:Name", "node01"
+            "Tsebt:Nodes:0:Digit", "1"
+            "Tsebt:Nodes:1:Name", "node02"
+            "Tsebt:Nodes:1:Digit", "2"
+            "Tsebt:PhaseSpaceFiles:0:Index", "01"
+            "Tsebt:PhaseSpaceFiles:0:Value", "ps01.IAEAphsp"
+            "Tsebt:PhaseSpaceFiles:1:Index", "02"
+            "Tsebt:PhaseSpaceFiles:1:Value", "ps02.IAEAphsp"
+        ]
+
+    ConfigurationBuilder().AddInMemoryCollection(values).Build() :> IConfiguration
 
 let server =
     testList "Server" [
@@ -20,6 +47,54 @@ let server =
 
             Expect.isOk result "Config stub should succeed"
         }
+
+        testCase "TSEBT load fails when nodes list is empty"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            cfg.["Tsebt:Nodes:0:Name"] <- null
+            cfg.["Tsebt:Nodes:0:Digit"] <- null
+            cfg.["Tsebt:Nodes:1:Name"] <- null
+            cfg.["Tsebt:Nodes:1:Digit"] <- null
+            let loaded = TsebtConfig.load cfg
+            Expect.isError loaded "Load should fail when no nodes are configured"
+
+        testCase "TSEBT load fails when phase-space files list is empty"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            cfg.["Tsebt:PhaseSpaceFiles:0:Index"] <- null
+            cfg.["Tsebt:PhaseSpaceFiles:0:Value"] <- null
+            cfg.["Tsebt:PhaseSpaceFiles:1:Index"] <- null
+            cfg.["Tsebt:PhaseSpaceFiles:1:Value"] <- null
+            let loaded = TsebtConfig.load cfg
+            Expect.isError loaded "Load should fail when no phase-space files are configured"
+
+        testCase "TSEBT load fails when node digits are duplicated"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            cfg.["Tsebt:Nodes:1:Digit"] <- "1"
+            let loaded = TsebtConfig.load cfg
+            Expect.isError loaded "Load should fail when node digits are not unique"
+
+        testCase "TSEBT load fails when phase-space indexes are duplicated"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            cfg.["Tsebt:PhaseSpaceFiles:1:Index"] <- "01"
+            let loaded = TsebtConfig.load cfg
+            Expect.isError loaded "Load should fail when phase-space indexes are not unique"
+
+        testCase "TSEBT load fails when seed base is not numeric"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            cfg.["Tsebt:Seed:CurrentBase"] <- "seed-x"
+            let loaded = TsebtConfig.load cfg
+            Expect.isError loaded "Load should fail when seed base is non-numeric"
+
+        testCase "TSEBT load fails when placeholder values are empty"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            cfg.["Tsebt:Placeholders:Seed"] <- ""
+            let loaded = TsebtConfig.load cfg
+            Expect.isError loaded "Load should fail when placeholders are empty"
 
         testCase "Seed construction appends node digit"
         <| fun _ ->
