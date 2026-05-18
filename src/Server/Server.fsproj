@@ -11,6 +11,7 @@
     <Compile Include="Bootstrap.fs" />
     <Compile Include="SeedBaseStore.fs" />
     <Compile Include="TemplateCatalog.fs" />
+    <Compile Include="GeneratePlanning.fs" />
     <Compile Include="GeneratePreview.fs" />
     <Compile Include="GenerateOperation.fs" />
     <Compile Include="SqliteInit.fs" />

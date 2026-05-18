@@ -6,16 +6,7 @@ open FsToolkit.ErrorHandling
 open Shared
 open TsebtConfig
 open Bootstrap
-
-/// Replaces a configured placeholder token in template text.
-let private replaceToken (token: string) (value: string) (text: string) : string = text.Replace(token, value)
-
-/// Builds a run id from phase-space index and seed.
-let private buildRunId (phaseSpaceIndex: string) (seed: string) : string = $"phsp{phaseSpaceIndex}_seed{seed}"
-
-/// Builds the generated input file name for a preview run.
-let private buildInputFileName (seed: string) (phaseSpaceIndex: string) (nodeDigit: string) : string =
-    $"input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt"
+open GeneratePlanning
 
 /// Reads and stitches selected template files from templates root.
 let private readAndStitchTemplates
@@ -33,7 +24,7 @@ let private readAndStitchTemplates
             else
                 Error $"Template file not found: {relativePath}")
         |> List.sequenceResultM
-        |> Result.map (String.concat $"{Environment.NewLine}{Environment.NewLine}")
+        |> Result.map stitchTemplateTexts
     with ex ->
         Error $"Failed reading template files: {ex.Message}"
 
@@ -73,17 +64,10 @@ let createPreview
         let templatesRoot = combineAppRoot settings.AppRoot settings.Paths.Templates
         let! stitchedTemplateText = readAndStitchTemplates templatesRoot request.SelectedTemplatePaths
 
-        let seed = $"{seedBase}{node.Digit}"
+        let seed = buildSeed seedBase node.Digit
         let runId = buildRunId phaseSpaceFile.Index seed
-
-        let outputFilePath =
-            combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId, "dose"))
-
-        let previewText =
-            stitchedTemplateText
-            |> replaceToken settings.Placeholders.PhaseSpaceFile phaseSpaceFile.Value
-            |> replaceToken settings.Placeholders.OutputFile outputFilePath
-            |> replaceToken settings.Placeholders.Seed seed
+        let outputFilePath = buildOutputFilePath settings runId
+        let previewText = applyConfiguredPlaceholders settings.Placeholders phaseSpaceFile.Value outputFilePath seed stitchedTemplateText
 
         let expectedGeneratedCount =
             request.SelectedNodeDigits.Length * request.SelectedPhaseSpaceIndexes.Length

@@ -5,6 +5,7 @@ open Expecto
 open Shared
 open Server
 open GenerateOperation
+open GeneratePlanning
 open TsebtConfig
 open SqliteInit
 open System

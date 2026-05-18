@@ -7,6 +7,7 @@ open Microsoft.Data.Sqlite
 open Shared
 open TsebtConfig
 open Bootstrap
+open GeneratePlanning
 
 /// Represents one planned generated run before writing files.
 type PlannedGeneratedRun = {
@@ -21,36 +22,6 @@ type PlannedGeneratedRun = {
     RunFolder: string
     FinalText: string
 }
-
-/// Replaces a configured placeholder token in template text.
-let private replaceToken (token: string) (value: string) (text: string) : string = text.Replace(token, value)
-
-/// Stitches template texts in deterministic list order.
-let stitchTemplateTexts (templateTexts: string list) : string =
-    String.concat $"{Environment.NewLine}{Environment.NewLine}" templateTexts
-
-/// Builds a seed from seed base and node digit.
-let buildSeed (seedBase: string) (nodeDigit: string) : string = $"{seedBase}{nodeDigit}"
-
-/// Builds a run id from phase-space index and seed.
-let buildRunId (phaseSpaceIndex: string) (seed: string) : string = $"phsp{phaseSpaceIndex}_seed{seed}"
-
-/// Builds the generated input file name for a run.
-let buildInputFileName (seed: string) (phaseSpaceIndex: string) (nodeDigit: string) : string =
-    $"input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt"
-
-/// Applies configured placeholders to stitched TOPAS template text.
-let applyConfiguredPlaceholders
-    (placeholders: TsebtPlaceholders)
-    (phaseSpaceFile: string)
-    (outputFilePath: string)
-    (seed: string)
-    (stitchedTemplateText: string)
-    : string =
-    stitchedTemplateText
-    |> replaceToken placeholders.PhaseSpaceFile phaseSpaceFile
-    |> replaceToken placeholders.OutputFile outputFilePath
-    |> replaceToken placeholders.Seed seed
 
 /// Reads and stitches selected template files from templates root.
 let private readAndStitchTemplates
@@ -102,19 +73,14 @@ let private planGeneratedRun
     (settings: TsebtSettings)
     (seedBase: string)
     (stitchedTemplateText: string)
-    (inputFolder: string)
     (node: TsebtNode)
     (phaseSpace: TsebtPhaseSpaceFile)
     : PlannedGeneratedRun =
     let seed = buildSeed seedBase node.Digit
     let runId = buildRunId phaseSpace.Index seed
-
-    let runFolder =
-        combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId))
-
-    let outputFilePath = Path.Combine(runFolder, "dose")
-    let inputFileName = buildInputFileName seed phaseSpace.Index node.Digit
-    let inputFilePath = Path.Combine(inputFolder, inputFileName)
+    let runFolder = buildRunFolderPath settings runId
+    let outputFilePath = buildOutputFilePath settings runId
+    let inputFilePath = buildInputFilePath settings seedBase seed phaseSpace.Index node.Digit
 
     let finalText =
         applyConfiguredPlaceholders settings.Placeholders phaseSpace.Value outputFilePath seed stitchedTemplateText
@@ -140,13 +106,9 @@ let planGeneratedRuns
     (selectedNodes: TsebtNode list)
     (selectedPhaseSpaces: TsebtPhaseSpaceFile list)
     : PlannedGeneratedRun list =
-    let inputFolder =
-        combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
-
     selectedPhaseSpaces
     |> List.collect (fun phaseSpace ->
-        selectedNodes
-        |> List.map (fun node -> planGeneratedRun settings seedBase stitchedTemplateText inputFolder node phaseSpace))
+        selectedNodes |> List.map (fun node -> planGeneratedRun settings seedBase stitchedTemplateText node phaseSpace))
 
 /// Returns duplicate run ids that already exist in SQLite generated_runs.
 let private findExistingRunIds (connection: SqliteConnection) (runIds: string list) : Result<string list, string> =
@@ -177,7 +139,7 @@ let private validateNoCollisions
     : Result<unit, string> =
     result {
         let inputFolder =
-            combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
+            buildInputFolderPath settings seedBase
 
         if folderContainsFiles inputFolder then
             return! Error $"Input folder already contains generated files for seed base {seedBase}: {inputFolder}"
@@ -320,7 +282,7 @@ let generate (settings: TsebtSettings) (seedBase: string) (request: GenerateRequ
         |> Result.map ignore
 
     let inputFolder =
-        combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
+        buildInputFolderPath settings seedBase
 
     let generatedRuns =
         plannedRuns
