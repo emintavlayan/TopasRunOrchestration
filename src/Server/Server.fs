@@ -1,5 +1,6 @@
 module Server
 
+open System
 open Microsoft.Extensions.Configuration
 open Microsoft.AspNetCore.Http
 open FsToolkit.ErrorHandling
@@ -21,9 +22,26 @@ let private toAppConfigView (settings: TsebtConfig.TsebtSettings) (seedBase: str
               settings.Placeholders.Seed ]
     }
 
-/// Builds IConfiguration including development appsettings.
+/// Builds IConfiguration from base and environment-specific appsettings plus environment variables.
 let buildConfiguration () : IConfiguration =
-    ConfigurationBuilder().SetBasePath(System.Environment.CurrentDirectory).AddJsonFile("appsettings.Development.json", false, false).Build()
+    let basePath = AppContext.BaseDirectory
+
+    let environmentName =
+        match Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") with
+        | value when not (String.IsNullOrWhiteSpace value) -> value
+        | _ ->
+            match Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") with
+            | value when not (String.IsNullOrWhiteSpace value) -> value
+            | _ -> "Production"
+
+    let environmentAppsettingsFile = $"appsettings.{environmentName}.json"
+
+    ConfigurationBuilder()
+        .SetBasePath(basePath)
+        .AddJsonFile("appsettings.json", false, false)
+        .AddJsonFile(environmentAppsettingsFile, true, false)
+        .AddEnvironmentVariables()
+        .Build()
 
 /// Loads Tsebt settings from configuration.
 let private loadSettings () : Result<TsebtConfig.TsebtSettings, string> =
