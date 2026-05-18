@@ -6,6 +6,9 @@ open Shared
 open Server
 open GenerateOperation
 open TsebtConfig
+open SqliteInit
+open System
+open System.IO
 
 let server =
     testList "Server" [
@@ -128,6 +131,47 @@ let server =
             Expect.equal (findSeed "01" "2") "10012" "ps01 node2 seed should be 10012"
             Expect.equal (findSeed "02" "1") "10011" "ps02 node1 seed should be 10011"
             Expect.equal (findSeed "02" "2") "10012" "ps02 node2 seed should be 10012"
+
+        testCase "Preflight fails when input seed folder already contains files" <| fun _ ->
+            let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-collision-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(appRoot) |> ignore
+
+            let settings = {
+                AppRoot = appRoot
+                Paths = {
+                    Templates = "templates"
+                    Inputs = "inputs"
+                    Runs = "runs"
+                    Database = "database\\app.db"
+                    Logs = "logs"
+                }
+                Placeholders = {
+                    PhaseSpaceFile = "__PHSP_FILE__"
+                    OutputFile = "__OUTPUT_FILE__"
+                    Seed = "__SEED__"
+                }
+                Seed = { CurrentBase = "1001" }
+                Nodes = [ { Name = "node01"; Digit = "1" } ]
+                PhaseSpaceFiles = [ { Index = "01"; Value = "ps01.IAEAphsp" } ]
+            }
+
+            match Bootstrap.ensureRootFolders settings with
+            | Error errorMessage -> failtestf "Failed creating root folders: %s" errorMessage
+            | Ok () ->
+                match initialize settings with
+                | Error errorMessage -> failtestf "Failed initializing sqlite: %s" errorMessage
+                | Ok _ ->
+                    let usedSeedBase = "1001"
+                    let existingInputFolder = Path.Combine(appRoot, "inputs", usedSeedBase)
+                    File.WriteAllText(Path.Combine(existingInputFolder, "already-there.txt"), "existing")
+                    let beforeFileCount = Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
+                    let plannedRuns = planGeneratedRuns settings usedSeedBase "template" settings.Nodes settings.PhaseSpaceFiles
+                    let result = preflightGenerateCollisions settings usedSeedBase plannedRuns
+                    Expect.isError result "Preflight should fail when seed input folder already contains files"
+                    let afterFileCount = Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
+                    Expect.equal afterFileCount beforeFileCount "Preflight should not write any new files"
+
+            Directory.Delete(appRoot, true)
     ]
 
 let all = testList "All" [ Shared.Tests.shared; server ]

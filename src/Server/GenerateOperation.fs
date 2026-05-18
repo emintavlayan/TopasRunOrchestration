@@ -159,6 +159,18 @@ let private validateNoCollisions (settings: TsebtSettings) (seedBase: string) (p
         | [] -> return ()
     }
 
+/// Checks generate collisions against filesystem and SQLite before any writes.
+let preflightGenerateCollisions (settings: TsebtSettings) (seedBase: string) (plannedRuns: PlannedGeneratedRun list) : Result<unit, string> =
+    try
+        let databasePath = combineAppRoot settings.AppRoot settings.Paths.Database
+        let connectionStringBuilder = SqliteConnectionStringBuilder()
+        connectionStringBuilder.DataSource <- databasePath
+        use connection = new SqliteConnection(connectionStringBuilder.ConnectionString)
+        connection.Open()
+        validateNoCollisions settings seedBase plannedRuns connection
+    with ex ->
+        Error $"Failed running generate preflight collision checks: {ex.Message}"
+
 /// Inserts a generated batch row and returns the new batch id.
 let private insertBatch (connection: SqliteConnection) (seedBase: string) : Result<int64, string> =
     try
