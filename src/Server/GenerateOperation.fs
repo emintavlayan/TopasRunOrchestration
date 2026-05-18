@@ -25,6 +25,9 @@ type PlannedGeneratedRun = {
 /// Replaces a configured placeholder token in template text.
 let private replaceToken (token: string) (value: string) (text: string) : string = text.Replace(token, value)
 
+/// Stitches template texts in deterministic list order.
+let stitchTemplateTexts (templateTexts: string list) : string = String.concat $"{Environment.NewLine}{Environment.NewLine}" templateTexts
+
 /// Builds a seed from seed base and node digit.
 let buildSeed (seedBase: string) (nodeDigit: string) : string = $"{seedBase}{nodeDigit}"
 
@@ -34,6 +37,13 @@ let buildRunId (phaseSpaceIndex: string) (seed: string) : string = $"phsp{phaseS
 /// Builds the generated input file name for a run.
 let buildInputFileName (seed: string) (phaseSpaceIndex: string) (nodeDigit: string) : string =
     $"input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt"
+
+/// Applies configured placeholders to stitched TOPAS template text.
+let applyConfiguredPlaceholders (placeholders: TsebtPlaceholders) (phaseSpaceFile: string) (outputFilePath: string) (seed: string) (stitchedTemplateText: string) : string =
+    stitchedTemplateText
+    |> replaceToken placeholders.PhaseSpaceFile phaseSpaceFile
+    |> replaceToken placeholders.OutputFile outputFilePath
+    |> replaceToken placeholders.Seed seed
 
 /// Reads and stitches selected template files from templates root.
 let private readAndStitchTemplates (templatesRoot: string) (relativeTemplatePaths: string list) : Result<string, string> =
@@ -48,7 +58,7 @@ let private readAndStitchTemplates (templatesRoot: string) (relativeTemplatePath
             else
                 Error $"Template file not found: {relativePath}")
         |> List.sequenceResultM
-        |> Result.map (String.concat $"{Environment.NewLine}{Environment.NewLine}")
+        |> Result.map stitchTemplateTexts
     with ex ->
         Error $"Failed reading template files: {ex.Message}"
 
@@ -80,11 +90,7 @@ let private planGeneratedRun (settings: TsebtSettings) (seedBase: string) (stitc
     let inputFileName = buildInputFileName seed phaseSpace.Index node.Digit
     let inputFilePath = Path.Combine(inputFolder, inputFileName)
 
-    let finalText =
-        stitchedTemplateText
-        |> replaceToken settings.Placeholders.PhaseSpaceFile phaseSpace.Value
-        |> replaceToken settings.Placeholders.OutputFile outputFilePath
-        |> replaceToken settings.Placeholders.Seed seed
+    let finalText = applyConfiguredPlaceholders settings.Placeholders phaseSpace.Value outputFilePath seed stitchedTemplateText
 
     {
         RunId = runId
