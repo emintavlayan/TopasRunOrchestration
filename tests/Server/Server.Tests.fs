@@ -7,15 +7,13 @@ open Server
 
 let server =
     testList "Server" [
-        testCase "Adding valid Todo"
-        <| fun _ ->
-            let validTodo = Todo.create "TODO"
-            let expectedResult = Ok()
+        testCaseAsync "Topas API config stub returns Ok"
+        <| async {
+            let api = topasApi null
+            let! result = api.getAppConfig ()
 
-            let result = Storage.addTodo validTodo
-
-            Expect.equal result expectedResult "Result should be ok"
-            Expect.contains Storage.todos validTodo "Storage should contain new todo"
+            Expect.isOk result "Config stub should succeed"
+        }
     ]
 
 let all = testList "All" [ Shared.Tests.shared; server ]

@@ -1,66 +1,78 @@
 module Index
 
 open Elmish
-open SAFE
-open Shared
 open Feliz
 
-type Model = {
-    Todos: RemoteData<Todo list>
-    Input: string
-}
+type Page =
+    | Generate
+    | Run
+    | Collect
 
 type Msg =
-    | SetInput of string
-    | LoadTodos of ApiCall<unit, Todo list>
-    | SaveTodo of ApiCall<string, Todo list>
+    | SelectPage of Page
+
+type Model = { SelectedPage: Page }
 
 /// Returns the initial model for the basic client page.
-let init () : Model * Cmd<Msg> =
-    {
-        Todos = NotStarted
-        Input = ""
-    },
-    Cmd.none
+let init () : Model * Cmd<Msg> = { SelectedPage = Generate }, Cmd.none
 
 /// Updates the model for incoming messages.
 let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     match msg with
-    | SetInput value -> { model with Input = value }, Cmd.none
-    | LoadTodos call ->
-        match call with
-        | Start() -> { model with Todos = model.Todos.StartLoading() }, Cmd.none
-        | Finished todos -> { model with Todos = Loaded todos }, Cmd.none
-    | SaveTodo call ->
-        match call with
-        | Start _ -> model, Cmd.none
-        | Finished todos ->
-            {
-                model with
-                    Todos = Loaded todos
-                    Input = ""
-            },
-            Cmd.none
+    | SelectPage page -> { model with SelectedPage = page }, Cmd.none
 
-/// Renders a basic page while server features are being implemented.
-let view (model: Model) (_dispatch: Msg -> unit) =
+/// Returns display text for a page tab.
+let pageLabel (page: Page) : string =
+    match page with
+    | Generate -> "Generate"
+    | Run -> "Run"
+    | Collect -> "Collect"
+
+/// Returns page body text for the selected tab.
+let pageDescription (page: Page) : string =
+    match page with
+    | Generate -> "Generate selected. Wizard implementation is not started yet."
+    | Run -> "Run: Not implemented."
+    | Collect -> "Collect: Not implemented."
+
+/// Renders one tab button.
+let tabButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
+    let isSelected = selectedPage = page
+
+    Html.button [
+        prop.className (
+            if isSelected then
+                "rounded-md bg-slate-800 px-4 py-2 text-white"
+            else
+                "rounded-md bg-slate-200 px-4 py-2 text-slate-900 hover:bg-slate-300"
+        )
+        prop.text (pageLabel page)
+        prop.onClick (fun _ -> dispatch (SelectPage page))
+    ]
+
+/// Renders the basic landing page with Generate, Run, and Collect tabs.
+let view (model: Model) (dispatch: Msg -> unit) =
     Html.main [
         prop.className "min-h-screen flex items-center justify-center bg-slate-100 text-slate-900"
         prop.children [
             Html.section [
-                prop.className "max-w-xl rounded-lg border border-slate-300 bg-white p-8 shadow-sm"
+                prop.className "w-full max-w-2xl rounded-lg border border-slate-300 bg-white p-8 shadow-sm"
                 prop.children [
                     Html.h1 [
                         prop.className "text-3xl font-semibold"
                         prop.text "TopasRunOrchestration"
                     ]
-                    Html.p [
-                        prop.className "mt-4 text-base"
-                        prop.text "Server startup now loads configuration, creates root folders, and initializes SQLite."
+                    Html.div [
+                        prop.className "mt-6 flex gap-3"
+                        prop.children [
+                            tabButton model.SelectedPage Generate dispatch
+                            tabButton model.SelectedPage Run dispatch
+                            tabButton model.SelectedPage Collect dispatch
+                        ]
                     ]
                     Html.p [
-                        prop.className "mt-2 text-sm text-slate-600"
-                        prop.text $"Current todos in model: {model.Todos |> RemoteData.map _.Length |> RemoteData.defaultValue 0}"
+                        prop.className "mt-6 text-base"
+                        prop.text (pageDescription model.SelectedPage)
                     ]
                 ]
             ]

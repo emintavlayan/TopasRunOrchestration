@@ -10,9 +10,13 @@ open Shared
 
 let shared =
     testList "Shared" [
-        testCase "Empty string is not a valid description"
+        testCase "Generate request DTO keeps selected node digits"
         <| fun _ ->
-            let expected = false
-            let actual = Todo.isValid ""
-            Expect.equal actual expected "Should be false"
+            let dto = {
+                SelectedTemplatePaths = [ "physics/em_standard_opt4.txt" ]
+                SelectedNodeDigits = [ "1"; "2" ]
+                SelectedPhaseSpaceIndexes = [ "01" ]
+            }
+
+            Expect.equal dto.SelectedNodeDigits.Length 2 "Should keep provided node digits"
     ]
