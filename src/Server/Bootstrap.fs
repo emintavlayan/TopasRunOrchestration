@@ -11,11 +11,13 @@ let combineAppRoot (appRoot: string) (relativePath: string) : string =
 let ensureRootFolders (settings: TsebtSettings) : Result<unit, string> =
     try
         let requiredFolders =
-            [ settings.Paths.Templates
-              settings.Paths.Inputs
-              settings.Paths.Runs
-              Path.GetDirectoryName(settings.Paths.Database)
-              settings.Paths.Logs ]
+            [
+                settings.Paths.Templates
+                settings.Paths.Inputs
+                settings.Paths.Runs
+                Path.GetDirectoryName(settings.Paths.Database)
+                settings.Paths.Logs
+            ]
             |> List.choose (fun value ->
                 if System.String.IsNullOrWhiteSpace(value) then
                     None
@@ -30,4 +32,3 @@ let ensureRootFolders (settings: TsebtSettings) : Result<unit, string> =
         Ok()
     with ex ->
         Error $"Failed to ensure root folders: {ex.Message}"
-

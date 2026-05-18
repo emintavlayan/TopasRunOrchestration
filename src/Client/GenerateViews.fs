@@ -48,7 +48,10 @@ let viewWelcome (generate: GenerateModel) =
         Html.p "Generate creates TOPAS input files for one simulation batch."
         Html.p [ prop.className "mt-2"; prop.text $"Current seed base: {seedBase}" ]
         Html.p [ prop.className "mt-1"; prop.text $"Configured nodes: {nodeCount}" ]
-        Html.p [ prop.className "mt-1"; prop.text $"Configured phase-space files: {phaseSpaceCount}" ]
+        Html.p [
+            prop.className "mt-1"
+            prop.text $"Configured phase-space files: {phaseSpaceCount}"
+        ]
     ]
 
 /// Renders the component selection step.
@@ -100,10 +103,8 @@ let viewNodes (generate: GenerateModel) (dispatch: Msg -> unit) =
             ]
             Html.div [
                 for node in config.Nodes |> List.sortBy _.Digit do
-                    checkBoxRow
-                        (generate.SelectedNodes.Contains node.Digit)
-                        $"{node.Digit} {node.Name}"
-                        (fun () -> dispatch (ToggleNode node.Digit))
+                    checkBoxRow (generate.SelectedNodes.Contains node.Digit) $"{node.Digit} {node.Name}" (fun () ->
+                        dispatch (ToggleNode node.Digit))
             ]
         ]
     | _ -> Html.p "Loading nodes..."
@@ -141,8 +142,18 @@ let viewPhaseSpaceFiles (generate: GenerateModel) (dispatch: Msg -> unit) =
 /// Renders the review step.
 let viewReview (generate: GenerateModel) =
     let selectedComponents = generate.SelectedComponents |> Seq.sort |> List.ofSeq
-    let selectedNodes = generate.SelectedNodes |> Seq.sort |> Seq.map (fun digit -> $"n{digit}") |> String.concat ", "
-    let selectedPhaseSpaces = generate.SelectedPhaseSpaceFiles |> Seq.sort |> Seq.map (fun index -> $"ps{index}") |> String.concat ", "
+
+    let selectedNodes =
+        generate.SelectedNodes
+        |> Seq.sort
+        |> Seq.map (fun digit -> $"n{digit}")
+        |> String.concat ", "
+
+    let selectedPhaseSpaces =
+        generate.SelectedPhaseSpaceFiles
+        |> Seq.sort
+        |> Seq.map (fun index -> $"ps{index}")
+        |> String.concat ", "
 
     Html.div [
         Html.h3 [ prop.className "text-lg font-semibold"; prop.text "Generate Wizard: Review" ]
@@ -151,7 +162,10 @@ let viewReview (generate: GenerateModel) =
             prop.children [
                 Html.p [ prop.className "font-medium"; prop.text "Selected components:" ]
                 if selectedComponents.IsEmpty then
-                    Html.p [ prop.className "mt-1 text-sm text-slate-600"; prop.text "No components selected." ]
+                    Html.p [
+                        prop.className "mt-1 text-sm text-slate-600"
+                        prop.text "No components selected."
+                    ]
                 else
                     Html.ul [
                         prop.className "mt-1 list-disc pl-6"
@@ -185,7 +199,7 @@ let viewReview (generate: GenerateModel) =
         Html.h4 [ prop.className "mt-4 font-semibold"; prop.text "Preview" ]
         match generate.Preview with
         | NotStarted -> Html.p "No preview available."
-        | Loading (Some preview) ->
+        | Loading(Some preview) ->
             Html.pre [
                 prop.className "mt-2 max-h-72 overflow-auto rounded bg-slate-100 p-3 text-xs"
                 prop.text preview.StitchedPreviewText
@@ -214,7 +228,10 @@ let viewResult (generate: GenerateModel) =
     | Loaded generated ->
         Html.div [
             Html.p [ prop.text $"Seed base: {generated.SeedBase}" ]
-            Html.p [ prop.className "mt-1"; prop.text $"Generated files: {generated.GeneratedInputCount}" ]
+            Html.p [
+                prop.className "mt-1"
+                prop.text $"Generated files: {generated.GeneratedInputCount}"
+            ]
             Html.p [ prop.className "mt-1"; prop.text $"Input folder: {generated.InputFolder}" ]
             Html.h4 [ prop.className "mt-4 font-semibold"; prop.text "Generated runs" ]
             if generated.GeneratedRuns.IsEmpty then
@@ -273,7 +290,10 @@ let viewWizardNavigation (generate: GenerateModel) (dispatch: Msg -> unit) =
 /// Renders the Generate page with wizard state.
 let viewGeneratePage (generate: GenerateModel) (dispatch: Msg -> unit) =
     Html.div [
-        Html.h2 [ prop.className "text-xl font-semibold"; prop.text $"Generate Wizard: {stepLabel generate.Step}" ]
+        Html.h2 [
+            prop.className "text-xl font-semibold"
+            prop.text $"Generate Wizard: {stepLabel generate.Step}"
+        ]
         Html.div [ prop.className "mt-4"; prop.children [ viewGenerateStep generate dispatch ] ]
         match generate.Error with
         | Some errorMessage -> Html.p [ prop.className "mt-3 text-sm text-red-700"; prop.text errorMessage ]

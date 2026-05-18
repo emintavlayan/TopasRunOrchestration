@@ -39,4 +39,3 @@ let listTemplateFiles (settings: TsebtSettings) : Result<TemplateFileInfo list, 
             |> Ok
     with ex ->
         Error $"Failed to list template files: {ex.Message}"
-

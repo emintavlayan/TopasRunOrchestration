@@ -16,10 +16,10 @@ let client =
 
 let all =
     testList "All" [
-        #if FABLE_COMPILER // This preprocessor directive makes editor happy
+#if FABLE_COMPILER // This preprocessor directive makes editor happy
         Shared.Tests.shared
 #endif
-                client
+        client
     ]
 
 [<EntryPoint>]

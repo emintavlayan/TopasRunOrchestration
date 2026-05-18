@@ -50,8 +50,14 @@ let topasApi = Api.makeProxy<ITopasApi> ()
 
 /// Returns the initial client model and startup command.
 let init () : Model * Cmd<Msg> =
-    let model = { SelectedPage = Generate; Generate = initialGenerateModel () }
-    let command = Cmd.batch [ Cmd.ofMsg (LoadAppConfig(Start())); Cmd.ofMsg (LoadTemplateFiles(Start())) ]
+    let model = {
+        SelectedPage = Generate
+        Generate = initialGenerateModel ()
+    }
+
+    let command =
+        Cmd.batch [ Cmd.ofMsg (LoadAppConfig(Start())); Cmd.ofMsg (LoadTemplateFiles(Start())) ]
+
     model, command
 
 /// Loads app configuration through the server API.
@@ -76,54 +82,184 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | SelectPage page -> { model with SelectedPage = page }, Cmd.none
     | LoadAppConfig call ->
         match call with
-        | Start() -> { model with Generate = { model.Generate with Config = model.Generate.Config.StartLoading(); Error = None } }, loadAppConfigCmd ()
+        | Start() ->
+            {
+                model with
+                    Generate = {
+                        model.Generate with
+                            Config = model.Generate.Config.StartLoading()
+                            Error = None
+                    }
+            },
+            loadAppConfigCmd ()
         | Finished resultValue ->
             let remoteData, error = setRemoteResult resultValue model.Generate.Config
-            { model with Generate = { model.Generate with Config = remoteData; Error = error } }, Cmd.none
+
+            {
+                model with
+                    Generate = {
+                        model.Generate with
+                            Config = remoteData
+                            Error = error
+                    }
+            },
+            Cmd.none
     | LoadTemplateFiles call ->
         match call with
         | Start() ->
-            { model with Generate = { model.Generate with TemplateFiles = model.Generate.TemplateFiles.StartLoading(); Error = None } }, loadTemplateFilesCmd ()
+            {
+                model with
+                    Generate = {
+                        model.Generate with
+                            TemplateFiles = model.Generate.TemplateFiles.StartLoading()
+                            Error = None
+                    }
+            },
+            loadTemplateFilesCmd ()
         | Finished resultValue ->
             let remoteData, error = setRemoteResult resultValue model.Generate.TemplateFiles
-            { model with Generate = { model.Generate with TemplateFiles = remoteData; Error = error } }, Cmd.none
-    | StartGenerateWizard -> { model with Generate = { model.Generate with Step = SelectComponents; Error = None } }, Cmd.none
-    | CancelGenerateWizard -> { model with Generate = { model.Generate with Step = Welcome; Error = None } }, Cmd.none
+
+            {
+                model with
+                    Generate = {
+                        model.Generate with
+                            TemplateFiles = remoteData
+                            Error = error
+                    }
+            },
+            Cmd.none
+    | StartGenerateWizard ->
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Step = SelectComponents
+                        Error = None
+                }
+        },
+        Cmd.none
+    | CancelGenerateWizard ->
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Step = Welcome
+                        Error = None
+                }
+        },
+        Cmd.none
     | PreviousGenerateStep -> handlePreviousStep model
     | NextGenerateStep -> handleNextStep loadPreviewCmd runGenerateCmd model
     | ToggleComponent relativePath ->
         let updated = toggleSelection relativePath model.Generate.SelectedComponents
-        { model with Generate = { model.Generate with SelectedComponents = updated; Error = None } }, Cmd.none
+
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        SelectedComponents = updated
+                        Error = None
+                }
+        },
+        Cmd.none
     | ToggleNode nodeDigit ->
         let updated = toggleSelection nodeDigit model.Generate.SelectedNodes
-        { model with Generate = { model.Generate with SelectedNodes = updated; Error = None } }, Cmd.none
+
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        SelectedNodes = updated
+                        Error = None
+                }
+        },
+        Cmd.none
     | TogglePhaseSpaceFile phaseSpaceIndex ->
         let updated = toggleSelection phaseSpaceIndex model.Generate.SelectedPhaseSpaceFiles
-        { model with Generate = { model.Generate with SelectedPhaseSpaceFiles = updated; Error = None } }, Cmd.none
+
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        SelectedPhaseSpaceFiles = updated
+                        Error = None
+                }
+        },
+        Cmd.none
     | SelectAllNodes ->
         let allNodes =
             match model.Generate.Config with
             | Loaded config -> config.Nodes |> List.map _.Digit |> Set.ofList
             | _ -> Set.empty
 
-        { model with Generate = { model.Generate with SelectedNodes = allNodes; Error = None } }, Cmd.none
-    | SelectNoNodes -> { model with Generate = { model.Generate with SelectedNodes = Set.empty; Error = None } }, Cmd.none
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        SelectedNodes = allNodes
+                        Error = None
+                }
+        },
+        Cmd.none
+    | SelectNoNodes ->
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        SelectedNodes = Set.empty
+                        Error = None
+                }
+        },
+        Cmd.none
     | SelectAllPhaseSpaceFiles ->
         let allPhaseSpaceFiles =
             match model.Generate.Config with
             | Loaded config -> config.PhaseSpaceFiles |> List.map _.Index |> Set.ofList
             | _ -> Set.empty
 
-        { model with Generate = { model.Generate with SelectedPhaseSpaceFiles = allPhaseSpaceFiles; Error = None } }, Cmd.none
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        SelectedPhaseSpaceFiles = allPhaseSpaceFiles
+                        Error = None
+                }
+        },
+        Cmd.none
     | SelectNoPhaseSpaceFiles ->
-        { model with Generate = { model.Generate with SelectedPhaseSpaceFiles = Set.empty; Error = None } }, Cmd.none
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        SelectedPhaseSpaceFiles = Set.empty
+                        Error = None
+                }
+        },
+        Cmd.none
     | LoadPreview call ->
         match call with
         | Start request ->
-            { model with Generate = { model.Generate with Preview = model.Generate.Preview.StartLoading(); Error = None } }, loadPreviewCmd request
+            {
+                model with
+                    Generate = {
+                        model.Generate with
+                            Preview = model.Generate.Preview.StartLoading()
+                            Error = None
+                    }
+            },
+            loadPreviewCmd request
         | Finished resultValue ->
             let remoteData, error = setRemoteResult resultValue model.Generate.Preview
-            { model with Generate = { model.Generate with Preview = remoteData; Error = error } }, Cmd.none
+
+            {
+                model with
+                    Generate = {
+                        model.Generate with
+                            Preview = remoteData
+                            Error = error
+                    }
+            },
+            Cmd.none
     | RunGenerate call ->
         match call with
         | Start request ->
@@ -150,4 +286,11 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                 },
                 Cmd.ofMsg (LoadAppConfig(Start()))
             | Error errorMessage ->
-                { model with Generate = { model.Generate with Error = Some errorMessage } }, Cmd.none
+                {
+                    model with
+                        Generate = {
+                            model.Generate with
+                                Error = Some errorMessage
+                        }
+                },
+                Cmd.none

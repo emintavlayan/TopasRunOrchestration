@@ -26,7 +26,8 @@ type PlannedGeneratedRun = {
 let private replaceToken (token: string) (value: string) (text: string) : string = text.Replace(token, value)
 
 /// Stitches template texts in deterministic list order.
-let stitchTemplateTexts (templateTexts: string list) : string = String.concat $"{Environment.NewLine}{Environment.NewLine}" templateTexts
+let stitchTemplateTexts (templateTexts: string list) : string =
+    String.concat $"{Environment.NewLine}{Environment.NewLine}" templateTexts
 
 /// Builds a seed from seed base and node digit.
 let buildSeed (seedBase: string) (nodeDigit: string) : string = $"{seedBase}{nodeDigit}"
@@ -39,14 +40,23 @@ let buildInputFileName (seed: string) (phaseSpaceIndex: string) (nodeDigit: stri
     $"input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt"
 
 /// Applies configured placeholders to stitched TOPAS template text.
-let applyConfiguredPlaceholders (placeholders: TsebtPlaceholders) (phaseSpaceFile: string) (outputFilePath: string) (seed: string) (stitchedTemplateText: string) : string =
+let applyConfiguredPlaceholders
+    (placeholders: TsebtPlaceholders)
+    (phaseSpaceFile: string)
+    (outputFilePath: string)
+    (seed: string)
+    (stitchedTemplateText: string)
+    : string =
     stitchedTemplateText
     |> replaceToken placeholders.PhaseSpaceFile phaseSpaceFile
     |> replaceToken placeholders.OutputFile outputFilePath
     |> replaceToken placeholders.Seed seed
 
 /// Reads and stitches selected template files from templates root.
-let private readAndStitchTemplates (templatesRoot: string) (relativeTemplatePaths: string list) : Result<string, string> =
+let private readAndStitchTemplates
+    (templatesRoot: string)
+    (relativeTemplatePaths: string list)
+    : Result<string, string> =
     try
         relativeTemplatePaths
         |> List.map (fun relativePath ->
@@ -69,7 +79,10 @@ let private tryFindNode (settings: TsebtSettings) (nodeDigit: string) : Result<T
     |> Result.requireSome $"Node digit not found in configuration: {nodeDigit}"
 
 /// Finds a configured phase-space file by its phase-space index.
-let private tryFindPhaseSpaceFile (settings: TsebtSettings) (phaseSpaceIndex: string) : Result<TsebtPhaseSpaceFile, string> =
+let private tryFindPhaseSpaceFile
+    (settings: TsebtSettings)
+    (phaseSpaceIndex: string)
+    : Result<TsebtPhaseSpaceFile, string> =
     settings.PhaseSpaceFiles
     |> List.tryFind (fun file -> file.Index = phaseSpaceIndex)
     |> Result.requireSome $"Phase-space index not found in configuration: {phaseSpaceIndex}"
@@ -79,18 +92,32 @@ let private utcNowString () : string = DateTime.UtcNow.ToString("O")
 
 /// Checks whether a folder exists and contains at least one file.
 let private folderContainsFiles (folderPath: string) : bool =
-    Directory.Exists folderPath && Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories) |> Seq.isEmpty |> not
+    Directory.Exists folderPath
+    && Directory.EnumerateFiles(folderPath, "*", SearchOption.AllDirectories)
+       |> Seq.isEmpty
+       |> not
 
 /// Builds one planned generated run from selected node and phase-space values.
-let private planGeneratedRun (settings: TsebtSettings) (seedBase: string) (stitchedTemplateText: string) (inputFolder: string) (node: TsebtNode) (phaseSpace: TsebtPhaseSpaceFile) : PlannedGeneratedRun =
+let private planGeneratedRun
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (stitchedTemplateText: string)
+    (inputFolder: string)
+    (node: TsebtNode)
+    (phaseSpace: TsebtPhaseSpaceFile)
+    : PlannedGeneratedRun =
     let seed = buildSeed seedBase node.Digit
     let runId = buildRunId phaseSpace.Index seed
-    let runFolder = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId))
+
+    let runFolder =
+        combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId))
+
     let outputFilePath = Path.Combine(runFolder, "dose")
     let inputFileName = buildInputFileName seed phaseSpace.Index node.Digit
     let inputFilePath = Path.Combine(inputFolder, inputFileName)
 
-    let finalText = applyConfiguredPlaceholders settings.Placeholders phaseSpace.Value outputFilePath seed stitchedTemplateText
+    let finalText =
+        applyConfiguredPlaceholders settings.Placeholders phaseSpace.Value outputFilePath seed stitchedTemplateText
 
     {
         RunId = runId
@@ -106,8 +133,15 @@ let private planGeneratedRun (settings: TsebtSettings) (seedBase: string) (stitc
     }
 
 /// Plans all generated runs before file-system and database effects.
-let planGeneratedRuns (settings: TsebtSettings) (seedBase: string) (stitchedTemplateText: string) (selectedNodes: TsebtNode list) (selectedPhaseSpaces: TsebtPhaseSpaceFile list) : PlannedGeneratedRun list =
-    let inputFolder = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
+let planGeneratedRuns
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (stitchedTemplateText: string)
+    (selectedNodes: TsebtNode list)
+    (selectedPhaseSpaces: TsebtPhaseSpaceFile list)
+    : PlannedGeneratedRun list =
+    let inputFolder =
+        combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
 
     selectedPhaseSpaces
     |> List.collect (fun phaseSpace ->
@@ -135,14 +169,18 @@ let private findExistingRunIds (connection: SqliteConnection) (runIds: string li
         Error $"Failed checking existing generated runs: {ex.Message}"
 
 /// Validates planned output collisions before writing files or inserting metadata.
-let private validateNoCollisions (settings: TsebtSettings) (seedBase: string) (plannedRuns: PlannedGeneratedRun list) (connection: SqliteConnection) : Result<unit, string> =
+let private validateNoCollisions
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (plannedRuns: PlannedGeneratedRun list)
+    (connection: SqliteConnection)
+    : Result<unit, string> =
     result {
-        let inputFolder = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
+        let inputFolder =
+            combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
 
         if folderContainsFiles inputFolder then
-            return!
-                Error
-                    $"Input folder already contains generated files for seed base {seedBase}: {inputFolder}"
+            return! Error $"Input folder already contains generated files for seed base {seedBase}: {inputFolder}"
 
         match plannedRuns |> List.tryFind (fun run -> File.Exists run.InputFilePath) with
         | Some conflictingRun -> return! Error $"Generated input file already exists: {conflictingRun.InputFilePath}"
@@ -160,7 +198,11 @@ let private validateNoCollisions (settings: TsebtSettings) (seedBase: string) (p
     }
 
 /// Checks generate collisions against filesystem and SQLite before any writes.
-let preflightGenerateCollisions (settings: TsebtSettings) (seedBase: string) (plannedRuns: PlannedGeneratedRun list) : Result<unit, string> =
+let preflightGenerateCollisions
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (plannedRuns: PlannedGeneratedRun list)
+    : Result<unit, string> =
     try
         let databasePath = combineAppRoot settings.AppRoot settings.Paths.Database
         let connectionStringBuilder = SqliteConnectionStringBuilder()
@@ -175,7 +217,10 @@ let preflightGenerateCollisions (settings: TsebtSettings) (seedBase: string) (pl
 let private insertBatch (connection: SqliteConnection) (seedBase: string) : Result<int64, string> =
     try
         use command = connection.CreateCommand()
-        command.CommandText <- "INSERT INTO generated_batches (seed_base, created_at) VALUES ($seedBase, $createdAt); SELECT last_insert_rowid();"
+
+        command.CommandText <-
+            "INSERT INTO generated_batches (seed_base, created_at) VALUES ($seedBase, $createdAt); SELECT last_insert_rowid();"
+
         command.Parameters.AddWithValue("$seedBase", seedBase) |> ignore
         command.Parameters.AddWithValue("$createdAt", utcNowString ()) |> ignore
         Ok(Convert.ToInt64(command.ExecuteScalar()))
@@ -183,7 +228,11 @@ let private insertBatch (connection: SqliteConnection) (seedBase: string) : Resu
         Error $"Failed inserting generated batch: {ex.Message}"
 
 /// Inserts one generated run row for metadata persistence.
-let private insertGeneratedRun (connection: SqliteConnection) (batchId: int64) (run: PlannedGeneratedRun) : Result<unit, string> =
+let private insertGeneratedRun
+    (connection: SqliteConnection)
+    (batchId: int64)
+    (run: PlannedGeneratedRun)
+    : Result<unit, string> =
     try
         use command = connection.CreateCommand()
 
@@ -198,7 +247,10 @@ let private insertGeneratedRun (connection: SqliteConnection) (batchId: int64) (
 
         command.Parameters.AddWithValue("$batchId", batchId) |> ignore
         command.Parameters.AddWithValue("$runId", run.RunId) |> ignore
-        command.Parameters.AddWithValue("$phaseSpaceIndex", run.PhaseSpaceIndex) |> ignore
+
+        command.Parameters.AddWithValue("$phaseSpaceIndex", run.PhaseSpaceIndex)
+        |> ignore
+
         command.Parameters.AddWithValue("$phaseSpaceFile", run.PhaseSpaceFile) |> ignore
         command.Parameters.AddWithValue("$nodeName", run.NodeName) |> ignore
         command.Parameters.AddWithValue("$nodeDigit", run.NodeDigit) |> ignore
@@ -209,7 +261,7 @@ let private insertGeneratedRun (connection: SqliteConnection) (batchId: int64) (
         command.Parameters.AddWithValue("$status", "Generated") |> ignore
         command.Parameters.AddWithValue("$createdAt", utcNowString ()) |> ignore
         command.ExecuteNonQuery() |> ignore
-        Ok ()
+        Ok()
     with ex ->
         Error $"Failed inserting generated run metadata: {ex.Message}"
 
@@ -224,53 +276,68 @@ let private writePlannedGeneratedInput (run: PlannedGeneratedRun) : Result<unit,
         else
             Directory.CreateDirectory(inputFolder) |> ignore
             File.WriteAllText(run.InputFilePath, run.FinalText)
-            Ok ()
+            Ok()
     with ex ->
         Error $"Failed generating input file: {ex.Message}"
 
 /// Executes real generate and persists generated metadata in SQLite.
-let generate (settings: TsebtSettings) (seedBase: string) (request: GenerateRequest) : Result<GenerateResult, string> =
-    result {
-        let templatesRoot = combineAppRoot settings.AppRoot settings.Paths.Templates
-        let! stitchedTemplateText = readAndStitchTemplates templatesRoot request.SelectedTemplatePaths
+let generate (settings: TsebtSettings) (seedBase: string) (request: GenerateRequest) : Result<GenerateResult, string> = result {
+    let templatesRoot = combineAppRoot settings.AppRoot settings.Paths.Templates
+    let! stitchedTemplateText = readAndStitchTemplates templatesRoot request.SelectedTemplatePaths
 
-        let! selectedNodes = request.SelectedNodeDigits |> List.map (tryFindNode settings) |> List.sequenceResultM
-        let! selectedPhaseSpaces = request.SelectedPhaseSpaceIndexes |> List.map (tryFindPhaseSpaceFile settings) |> List.sequenceResultM
+    let! selectedNodes =
+        request.SelectedNodeDigits
+        |> List.map (tryFindNode settings)
+        |> List.sequenceResultM
 
-        let plannedRuns = planGeneratedRuns settings seedBase stitchedTemplateText selectedNodes selectedPhaseSpaces
+    let! selectedPhaseSpaces =
+        request.SelectedPhaseSpaceIndexes
+        |> List.map (tryFindPhaseSpaceFile settings)
+        |> List.sequenceResultM
 
-        let databasePath = combineAppRoot settings.AppRoot settings.Paths.Database
-        let connectionStringBuilder = SqliteConnectionStringBuilder()
-        connectionStringBuilder.DataSource <- databasePath
-        use connection = new SqliteConnection(connectionStringBuilder.ConnectionString)
-        connection.Open()
-        do! validateNoCollisions settings seedBase plannedRuns connection
-        do! plannedRuns |> List.map writePlannedGeneratedInput |> List.sequenceResultM |> Result.map ignore
-        let! batchId = insertBatch connection seedBase
+    let plannedRuns =
+        planGeneratedRuns settings seedBase stitchedTemplateText selectedNodes selectedPhaseSpaces
 
-        do!
-            plannedRuns
-            |> List.map (insertGeneratedRun connection batchId)
-            |> List.sequenceResultM
-            |> Result.map ignore
+    let databasePath = combineAppRoot settings.AppRoot settings.Paths.Database
+    let connectionStringBuilder = SqliteConnectionStringBuilder()
+    connectionStringBuilder.DataSource <- databasePath
+    use connection = new SqliteConnection(connectionStringBuilder.ConnectionString)
+    connection.Open()
+    do! validateNoCollisions settings seedBase plannedRuns connection
 
-        let inputFolder = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
-        let generatedRuns =
-            plannedRuns
-            |> List.map (fun run -> {
-                RunId = run.RunId
-                InputFilePath = run.InputFilePath
-                Seed = run.Seed
-                NodeDigit = run.NodeDigit
-                PhaseSpaceIndex = run.PhaseSpaceIndex
-            })
+    do!
+        plannedRuns
+        |> List.map writePlannedGeneratedInput
+        |> List.sequenceResultM
+        |> Result.map ignore
 
-        return {
-            SeedBase = seedBase
-            GeneratedInputCount = generatedRuns.Length
-            NodeCount = selectedNodes.Length
-            PhaseSpaceCount = selectedPhaseSpaces.Length
-            InputFolder = inputFolder
-            GeneratedRuns = generatedRuns
-        }
+    let! batchId = insertBatch connection seedBase
+
+    do!
+        plannedRuns
+        |> List.map (insertGeneratedRun connection batchId)
+        |> List.sequenceResultM
+        |> Result.map ignore
+
+    let inputFolder =
+        combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
+
+    let generatedRuns =
+        plannedRuns
+        |> List.map (fun run -> {
+            RunId = run.RunId
+            InputFilePath = run.InputFilePath
+            Seed = run.Seed
+            NodeDigit = run.NodeDigit
+            PhaseSpaceIndex = run.PhaseSpaceIndex
+        })
+
+    return {
+        SeedBase = seedBase
+        GeneratedInputCount = generatedRuns.Length
+        NodeCount = selectedNodes.Length
+        PhaseSpaceCount = selectedPhaseSpaces.Length
+        InputFolder = inputFolder
+        GeneratedRuns = generatedRuns
     }
+}

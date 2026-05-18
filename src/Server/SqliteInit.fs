@@ -55,4 +55,3 @@ let initialize (settings: TsebtSettings) : Result<string, string> =
         Ok databasePath
     with ex ->
         Error $"Failed to initialize SQLite: {ex.Message}"
-

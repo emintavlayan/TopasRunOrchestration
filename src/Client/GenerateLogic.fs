@@ -6,18 +6,17 @@ open SAFE
 open Shared
 
 /// Creates the initial wizard model.
-let initialGenerateModel () : GenerateModel =
-    {
-        Step = Welcome
-        Config = NotStarted
-        TemplateFiles = NotStarted
-        SelectedComponents = Set.empty
-        SelectedNodes = Set.empty
-        SelectedPhaseSpaceFiles = Set.empty
-        Preview = NotStarted
-        GenerateResult = NotStarted
-        Error = None
-    }
+let initialGenerateModel () : GenerateModel = {
+    Step = Welcome
+    Config = NotStarted
+    TemplateFiles = NotStarted
+    SelectedComponents = Set.empty
+    SelectedNodes = Set.empty
+    SelectedPhaseSpaceFiles = Set.empty
+    Preview = NotStarted
+    GenerateResult = NotStarted
+    Error = None
+}
 
 /// Maps a Result value into remote data and error state.
 let setRemoteResult (resultValue: Result<'a, string>) (loadingState: RemoteData<'a>) : RemoteData<'a> * string option =
@@ -58,48 +57,107 @@ let canProceedComponents (generate: GenerateModel) : bool = not generate.Selecte
 let canProceedNodes (generate: GenerateModel) : bool = not generate.SelectedNodes.IsEmpty
 
 /// Returns true when phase-space selection is valid for next step.
-let canProceedPhaseSpaceFiles (generate: GenerateModel) : bool = not generate.SelectedPhaseSpaceFiles.IsEmpty
+let canProceedPhaseSpaceFiles (generate: GenerateModel) : bool =
+    not generate.SelectedPhaseSpaceFiles.IsEmpty
 
 /// Handles transitions when the next wizard button is pressed.
-let handleNextStep (loadPreviewCmd: GeneratePreviewRequest -> Cmd<Msg>) (runGenerateCmd: GenerateRequest -> Cmd<Msg>) (model: Model) : Model * Cmd<Msg> =
+let handleNextStep
+    (loadPreviewCmd: GeneratePreviewRequest -> Cmd<Msg>)
+    (runGenerateCmd: GenerateRequest -> Cmd<Msg>)
+    (model: Model)
+    : Model * Cmd<Msg> =
     match model.Generate.Step with
-    | Welcome -> { model with Generate = { model.Generate with Step = SelectComponents; Error = None } }, Cmd.none
+    | Welcome ->
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Step = SelectComponents
+                        Error = None
+                }
+        },
+        Cmd.none
     | SelectComponents when canProceedComponents model.Generate ->
-        { model with Generate = { model.Generate with Step = SelectNodes; Error = None } }, Cmd.none
-    | SelectComponents -> { model with Generate = { model.Generate with Error = Some "Select at least one component." } }, Cmd.none
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Step = SelectNodes
+                        Error = None
+                }
+        },
+        Cmd.none
+    | SelectComponents ->
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Error = Some "Select at least one component."
+                }
+        },
+        Cmd.none
     | SelectNodes when canProceedNodes model.Generate ->
-        { model with Generate = { model.Generate with Step = SelectPhaseSpaceFiles; Error = None } }, Cmd.none
-    | SelectNodes -> { model with Generate = { model.Generate with Error = Some "Select at least one node." } }, Cmd.none
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Step = SelectPhaseSpaceFiles
+                        Error = None
+                }
+        },
+        Cmd.none
+    | SelectNodes ->
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Error = Some "Select at least one node."
+                }
+        },
+        Cmd.none
     | SelectPhaseSpaceFiles when canProceedPhaseSpaceFiles model.Generate ->
         match buildPreviewRequest model.Generate with
         | Ok previewRequest ->
-            let updatedModel =
-                {
-                    model with
-                        Generate = {
-                            model.Generate with
-                                Step = Review
-                                Preview = model.Generate.Preview.StartLoading()
-                                Error = None
-                        }
-                }
+            let updatedModel = {
+                model with
+                    Generate = {
+                        model.Generate with
+                            Step = Review
+                            Preview = model.Generate.Preview.StartLoading()
+                            Error = None
+                    }
+            }
 
             updatedModel, loadPreviewCmd previewRequest
-        | Error errorMessage -> { model with Generate = { model.Generate with Error = Some errorMessage } }, Cmd.none
-    | SelectPhaseSpaceFiles ->
-        { model with Generate = { model.Generate with Error = Some "Select at least one phase-space file." } }, Cmd.none
-    | Review ->
-        let request = buildGenerateRequest model.Generate
-
-        let updatedModel =
+        | Error errorMessage ->
             {
                 model with
                     Generate = {
                         model.Generate with
-                            GenerateResult = model.Generate.GenerateResult.StartLoading()
-                            Error = None
+                            Error = Some errorMessage
                     }
-            }
+            },
+            Cmd.none
+    | SelectPhaseSpaceFiles ->
+        {
+            model with
+                Generate = {
+                    model.Generate with
+                        Error = Some "Select at least one phase-space file."
+                }
+        },
+        Cmd.none
+    | Review ->
+        let request = buildGenerateRequest model.Generate
+
+        let updatedModel = {
+            model with
+                Generate = {
+                    model.Generate with
+                        GenerateResult = model.Generate.GenerateResult.StartLoading()
+                        Error = None
+                }
+        }
 
         updatedModel, runGenerateCmd request
     | Result -> model, Cmd.none
@@ -115,11 +173,22 @@ let handlePreviousStep (model: Model) : Model * Cmd<Msg> =
         | Review -> SelectPhaseSpaceFiles
         | Result -> Review
 
-    { model with Generate = { model.Generate with Step = previousStep; Error = None } }, Cmd.none
+    {
+        model with
+            Generate = {
+                model.Generate with
+                    Step = previousStep
+                    Error = None
+            }
+    },
+    Cmd.none
 
 /// Toggles a selected value in a set.
 let toggleSelection (value: string) (selection: Set<string>) : Set<string> =
-    if selection.Contains value then selection.Remove value else selection.Add value
+    if selection.Contains value then
+        selection.Remove value
+    else
+        selection.Add value
 
 /// Returns display text for a top-level page tab.
 let pageLabel (page: Page) : string =

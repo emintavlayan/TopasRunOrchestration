@@ -69,21 +69,20 @@ let private tryReadMaxUsedSeedBase (connection: SqliteConnection) : Result<int o
         }
 
 /// Gets the runtime next seed base using SQLite if available, otherwise config default.
-let getNextSeedBase (settings: TsebtSettings) : Result<string, string> =
-    result {
-        let! configSeedBase = parseSeedBase settings.Seed.CurrentBase
-        let databasePath = getDatabasePath settings
+let getNextSeedBase (settings: TsebtSettings) : Result<string, string> = result {
+    let! configSeedBase = parseSeedBase settings.Seed.CurrentBase
+    let databasePath = getDatabasePath settings
 
-        if not (File.Exists databasePath) then
-            return string configSeedBase
-        else
-            let connectionStringBuilder = SqliteConnectionStringBuilder()
-            connectionStringBuilder.DataSource <- databasePath
-            use connection = new SqliteConnection(connectionStringBuilder.ConnectionString)
-            connection.Open()
-            let! maxUsedSeedBase = tryReadMaxUsedSeedBase connection
+    if not (File.Exists databasePath) then
+        return string configSeedBase
+    else
+        let connectionStringBuilder = SqliteConnectionStringBuilder()
+        connectionStringBuilder.DataSource <- databasePath
+        use connection = new SqliteConnection(connectionStringBuilder.ConnectionString)
+        connection.Open()
+        let! maxUsedSeedBase = tryReadMaxUsedSeedBase connection
 
-            match maxUsedSeedBase with
-            | None -> return string configSeedBase
-            | Some maxUsed -> return string (maxUsed + 1)
-    }
+        match maxUsedSeedBase with
+        | None -> return string configSeedBase
+        | Some maxUsed -> return string (maxUsed + 1)
+}

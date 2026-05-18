@@ -18,7 +18,10 @@ let private buildInputFileName (seed: string) (phaseSpaceIndex: string) (nodeDig
     $"input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt"
 
 /// Reads and stitches selected template files from templates root.
-let private readAndStitchTemplates (templatesRoot: string) (relativeTemplatePaths: string list) : Result<string, string> =
+let private readAndStitchTemplates
+    (templatesRoot: string)
+    (relativeTemplatePaths: string list)
+    : Result<string, string> =
     try
         relativeTemplatePaths
         |> List.map (fun relativePath ->
@@ -41,17 +44,26 @@ let private tryFindNode (settings: TsebtSettings) (nodeDigit: string) : Result<T
     |> Result.requireSome $"Node digit not found in configuration: {nodeDigit}"
 
 /// Finds a configured phase-space file by its phase-space index.
-let private tryFindPhaseSpaceFile (settings: TsebtSettings) (phaseSpaceIndex: string) : Result<TsebtPhaseSpaceFile, string> =
+let private tryFindPhaseSpaceFile
+    (settings: TsebtSettings)
+    (phaseSpaceIndex: string)
+    : Result<TsebtPhaseSpaceFile, string> =
     settings.PhaseSpaceFiles
     |> List.tryFind (fun file -> file.Index = phaseSpaceIndex)
     |> Result.requireSome $"Phase-space index not found in configuration: {phaseSpaceIndex}"
 
 /// Returns the first selected value from a list.
 let private firstSelected (name: string) (values: string list) : Result<string, string> =
-    values |> List.tryHead |> Result.requireSome $"At least one {name} must be selected."
+    values
+    |> List.tryHead
+    |> Result.requireSome $"At least one {name} must be selected."
 
 /// Builds a real preview result from selected templates, nodes, and phase-space files.
-let createPreview (settings: TsebtSettings) (seedBase: string) (request: GeneratePreviewRequest) : Result<GeneratePreviewResult, string> =
+let createPreview
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (request: GeneratePreviewRequest)
+    : Result<GeneratePreviewResult, string> =
     result {
         let! firstNodeDigit = firstSelected "node" request.SelectedNodeDigits
         let! firstPhaseSpaceIndex = firstSelected "phase-space file" request.SelectedPhaseSpaceIndexes
@@ -63,7 +75,9 @@ let createPreview (settings: TsebtSettings) (seedBase: string) (request: Generat
 
         let seed = $"{seedBase}{node.Digit}"
         let runId = buildRunId phaseSpaceFile.Index seed
-        let outputFilePath = combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId, "dose"))
+
+        let outputFilePath =
+            combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId, "dose"))
 
         let previewText =
             stitchedTemplateText
@@ -71,7 +85,8 @@ let createPreview (settings: TsebtSettings) (seedBase: string) (request: Generat
             |> replaceToken settings.Placeholders.OutputFile outputFilePath
             |> replaceToken settings.Placeholders.Seed seed
 
-        let expectedGeneratedCount = request.SelectedNodeDigits.Length * request.SelectedPhaseSpaceIndexes.Length
+        let expectedGeneratedCount =
+            request.SelectedNodeDigits.Length * request.SelectedPhaseSpaceIndexes.Length
 
         return {
             RunId = runId
