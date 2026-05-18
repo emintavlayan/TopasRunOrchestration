@@ -1,4 +1,4 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
+<?xml version="1.0" encoding="utf-8"?>
 <Project Sdk="Microsoft.NET.Sdk">
     <PropertyGroup>
         <TargetFramework>net8.0</TargetFramework>
@@ -9,6 +9,10 @@
         <None Include="tailwind.config.js" />
         <None Include="index.html" />
         <None Include="paket.references" />
+        <Compile Include="GenerateTypes.fs" />
+        <Compile Include="GenerateLogic.fs" />
+        <Compile Include="GenerateViews.fs" />
+        <Compile Include="PageViews.fs" />
         <Compile Include="Index.fs" />
         <Compile Include="App.fs" />
         <None Include="vite.config.mts" />
