@@ -74,25 +74,25 @@ The same node seed pattern repeats across phase-space files.
 ## RunId rule
 
 ```text
-runId = phsp{phaseSpaceIndex}_seed{seed}
+runId = seed{seed}_phsp{phaseSpaceIndex}
 ```
 
 Example:
 
 ```text
-phsp01_seed10011
+seed10011_phsp01
 ```
 
 ## Generated input file naming
 
 ```text
-input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt
+seed{seed}_phsp{phaseSpaceIndex}.txt
 ```
 
 Example:
 
 ```text
-input_sd10011_ps01_n1.txt
+seed10011_phsp01.txt
 ```
 
 Written under:
@@ -106,7 +106,7 @@ Written under:
 `OutputFile` placeholder is replaced with:
 
 ```text
-{AppRoot}/runs/{runId}/dose
+{AppRoot}/runs/{seedBase}/seed{seed}_phsp{phaseSpaceIndex}
 ```
 
 ## Placeholder replacement
@@ -114,7 +114,7 @@ Written under:
 Configured placeholders are replaced for each generated file:
 
 - phase-space placeholder -> configured phase-space value
-- output placeholder -> `{AppRoot}/runs/{runId}/dose`
+- output placeholder -> `{AppRoot}/runs/{seedBase}/seed{seed}_phsp{phaseSpaceIndex}`
 - seed placeholder -> constructed seed
 
 ## Collision safety
@@ -130,11 +130,15 @@ Checks:
 2. Planned generated input file collisions:
    - if any planned generated input path already exists -> error
 
-3. Planned run folder collisions:
-   - target: `{AppRoot}/{Paths.Runs}/{runId}`
-   - if folder already exists -> error
+3. Run batch folder collision:
+   - target: `{AppRoot}/{Paths.Runs}/{seedBase}`
+   - if folder exists and contains files -> error
 
-4. Planned SQLite duplicate collisions:
+4. Planned output base path collisions:
+   - target: `{AppRoot}/{Paths.Runs}/{seedBase}/seed{seed}_phsp{phaseSpaceIndex}`
+   - if `path`, `path.csv`, or `path.log` already exists -> error
+
+5. Planned SQLite duplicate collisions:
    - if any planned `run_id` already exists in `generated_runs` -> error
 
 All-or-nothing guarantee:

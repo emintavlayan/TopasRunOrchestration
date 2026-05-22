@@ -78,9 +78,9 @@ let private planGeneratedRun
     : PlannedGeneratedRun =
     let seed = buildSeed seedBase node.Digit
     let runId = buildRunId phaseSpace.Index seed
-    let runFolder = buildRunFolderPath settings runId
-    let outputFilePath = buildOutputFilePath settings runId
-    let inputFilePath = buildInputFilePath settings seedBase seed phaseSpace.Index node.Digit
+    let runFolder = buildRunFolderPath settings seedBase
+    let outputFilePath = buildOutputFilePath settings seedBase runId
+    let inputFilePath = buildInputFilePath settings seedBase seed phaseSpace.Index
 
     let finalText =
         applyConfiguredPlaceholders settings.Placeholders phaseSpace.Value outputFilePath seed stitchedTemplateText
@@ -97,6 +97,13 @@ let private planGeneratedRun
         RunFolder = runFolder
         FinalText = finalText
     }
+
+/// Returns true when any practical output collision exists for the output base path.
+let private hasOutputPathCollision (outputFilePath: string) : bool =
+    File.Exists outputFilePath
+    || Directory.Exists outputFilePath
+    || File.Exists(outputFilePath + ".csv")
+    || File.Exists(outputFilePath + ".log")
 
 /// Plans all generated runs before file-system and database effects.
 let planGeneratedRuns
@@ -148,9 +155,14 @@ let private validateNoCollisions
         | Some conflictingRun -> return! Error $"Generated input file already exists: {conflictingRun.InputFilePath}"
         | None -> ()
 
-        match plannedRuns |> List.tryFind (fun run -> Directory.Exists run.RunFolder) with
-        | Some conflictingRun -> return! Error $"Run folder already exists: {conflictingRun.RunFolder}"
+        match plannedRuns |> List.tryFind (fun run -> hasOutputPathCollision run.OutputFilePath) with
+        | Some conflictingRun -> return! Error $"Generated output path already exists: {conflictingRun.OutputFilePath}"
         | None -> ()
+
+        match plannedRuns |> List.tryHead with
+        | Some firstRun when folderContainsFiles firstRun.RunFolder ->
+            return! Error $"Run folder already contains generated files for seed base {seedBase}: {firstRun.RunFolder}"
+        | _ -> ()
 
         let! existingRunIds = plannedRuns |> List.map _.RunId |> findExistingRunIds connection
 
@@ -289,6 +301,8 @@ let generate (settings: TsebtSettings) (seedBase: string) (request: GenerateRequ
         |> List.map (fun run -> {
             RunId = run.RunId
             InputFilePath = run.InputFilePath
+            OutputFilePath = run.OutputFilePath
+            RunFolder = run.RunFolder
             Seed = run.Seed
             NodeDigit = run.NodeDigit
             PhaseSpaceIndex = run.PhaseSpaceIndex

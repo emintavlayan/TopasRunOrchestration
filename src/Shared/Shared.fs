@@ -34,6 +34,8 @@ type GenerateRequest = {
 type GeneratedRunInfo = {
     RunId: string
     InputFilePath: string
+    OutputFilePath: string
+    RunFolder: string
     Seed: string
     NodeDigit: string
     PhaseSpaceIndex: string

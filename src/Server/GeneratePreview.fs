@@ -66,7 +66,7 @@ let createPreview
 
         let seed = buildSeed seedBase node.Digit
         let runId = buildRunId phaseSpaceFile.Index seed
-        let outputFilePath = buildOutputFilePath settings runId
+        let outputFilePath = buildOutputFilePath settings seedBase runId
         let previewText = applyConfiguredPlaceholders settings.Placeholders phaseSpaceFile.Value outputFilePath seed stitchedTemplateText
 
         let expectedGeneratedCount =
@@ -75,7 +75,7 @@ let createPreview
         return {
             RunId = runId
             Seed = seed
-            InputFileName = buildInputFileName seed phaseSpaceFile.Index node.Digit
+            InputFileName = buildInputFileName seed phaseSpaceFile.Index
             OutputFilePath = outputFilePath
             StitchedPreviewText = previewText
             ExpectedGeneratedCount = expectedGeneratedCount

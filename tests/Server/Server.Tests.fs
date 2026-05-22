@@ -102,16 +102,16 @@ let server =
             Expect.equal (buildSeed "1001" "7") "10017" "Seed should append node digit 7"
 
         testCase "RunId construction uses phase-space index and seed"
-        <| fun _ -> Expect.equal (buildRunId "01" "10011") "phsp01_seed10011" "RunId should match expected format"
+        <| fun _ -> Expect.equal (buildRunId "01" "10011") "seed10011_phsp01" "RunId should match expected format"
 
         testCase "Generated input file name follows expected pattern"
         <| fun _ ->
             Expect.equal
-                (buildInputFileName "10011" "01" "1")
-                "input_sd10011_ps01_n1.txt"
+                (buildInputFileName "10011" "01")
+                "seed10011_phsp01.txt"
                 "Generated filename should match expected format"
 
-        testCase "Run folder and output path planning uses runs/runId/dose"
+        testCase "Run folder and output path planning uses runs/seedBase/seed_phsp"
         <| fun _ ->
             let settings = {
                 AppRoot = @"C:\app-root"
@@ -145,12 +145,12 @@ let server =
             let normalizedOutputPath = firstRun.OutputFilePath.Replace('\\', '/')
 
             Expect.isTrue
-                (normalizedRunFolder.EndsWith("runs/phsp01_seed10011"))
-                "Run folder should end with runs/phsp01_seed10011"
+                (normalizedRunFolder.EndsWith("runs/1001"))
+                "Run folder should end with runs/1001"
 
             Expect.isTrue
-                (normalizedOutputPath.EndsWith("runs/phsp01_seed10011/dose"))
-                "Output file path should end with runs/phsp01_seed10011/dose"
+                (normalizedOutputPath.EndsWith("runs/1001/seed10011_phsp01"))
+                "Output file path should end with runs/1001/seed10011_phsp01"
 
         testCase "Placeholder replacement applies all configured tokens"
         <| fun _ ->
@@ -166,13 +166,13 @@ let server =
                 applyConfiguredPlaceholders
                     placeholders
                     "ps01.IAEAphsp"
-                    @"C:\runs\phsp01_seed10011\dose"
+                    @"C:\runs\1001\seed10011_phsp01"
                     "10011"
                     sourceText
 
             Expect.equal
                 replaced
-                "seed=10011; phsp=ps01.IAEAphsp; output=C:\\runs\\phsp01_seed10011\\dose"
+                "seed=10011; phsp=ps01.IAEAphsp; output=C:\\runs\\1001\\seed10011_phsp01"
                 "All placeholders should be replaced"
 
         testCase "Stitched text keeps input ordering"

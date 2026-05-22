@@ -12,11 +12,10 @@ let private replaceToken (token: string) (value: string) (text: string) : string
 let buildSeed (seedBase: string) (nodeDigit: string) : string = $"{seedBase}{nodeDigit}"
 
 /// Builds a run id from phase-space index and seed.
-let buildRunId (phaseSpaceIndex: string) (seed: string) : string = $"phsp{phaseSpaceIndex}_seed{seed}"
+let buildRunId (phaseSpaceIndex: string) (seed: string) : string = $"seed{seed}_phsp{phaseSpaceIndex}"
 
 /// Builds the generated input file name for a run.
-let buildInputFileName (seed: string) (phaseSpaceIndex: string) (nodeDigit: string) : string =
-    $"input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt"
+let buildInputFileName (seed: string) (phaseSpaceIndex: string) : string = $"seed{seed}_phsp{phaseSpaceIndex}.txt"
 
 /// Stitches template texts in deterministic list order.
 let stitchTemplateTexts (templateTexts: string list) : string =
@@ -35,20 +34,20 @@ let applyConfiguredPlaceholders
     |> replaceToken placeholders.OutputFile outputFilePath
     |> replaceToken placeholders.Seed seed
 
-/// Builds the run folder path for a run id.
-let buildRunFolderPath (settings: TsebtSettings) (runId: string) : string =
-    combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, runId))
+/// Builds the run folder path for a seed base.
+let buildRunFolderPath (settings: TsebtSettings) (seedBase: string) : string =
+    combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Runs, seedBase))
 
-/// Builds the output file base path for a run id.
-let buildOutputFilePath (settings: TsebtSettings) (runId: string) : string =
-    Path.Combine(buildRunFolderPath settings runId, "dose")
+/// Builds the output file base path for a run.
+let buildOutputFilePath (settings: TsebtSettings) (seedBase: string) (runId: string) : string =
+    Path.Combine(buildRunFolderPath settings seedBase, runId)
 
 /// Builds the input folder path for a seed base.
 let buildInputFolderPath (settings: TsebtSettings) (seedBase: string) : string =
     combineAppRoot settings.AppRoot (Path.Combine(settings.Paths.Inputs, seedBase))
 
 /// Builds the full input file path for generated TOPAS input output.
-let buildInputFilePath (settings: TsebtSettings) (seedBase: string) (seed: string) (phaseSpaceIndex: string) (nodeDigit: string) : string =
+let buildInputFilePath (settings: TsebtSettings) (seedBase: string) (seed: string) (phaseSpaceIndex: string) : string =
     let inputFolder = buildInputFolderPath settings seedBase
-    let inputFileName = buildInputFileName seed phaseSpaceIndex nodeDigit
+    let inputFileName = buildInputFileName seed phaseSpaceIndex
     Path.Combine(inputFolder, inputFileName)

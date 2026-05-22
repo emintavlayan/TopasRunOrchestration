@@ -241,7 +241,7 @@ let viewResult (generate: GenerateModel) =
                     prop.className "mt-2 list-disc pl-6"
                     prop.children [
                         for run in generated.GeneratedRuns do
-                            Html.li $"{run.RunId} | {run.InputFilePath} | seed {run.Seed}"
+                            Html.li $"{run.RunId} | input: {run.InputFilePath} | output: {run.OutputFilePath} | run folder: {run.RunFolder}"
                     ]
                 ]
         ]

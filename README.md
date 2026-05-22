@@ -82,19 +82,19 @@ seed = seedBase + nodeDigit
 RunId rule:
 
 ```text
-phsp{phaseSpaceIndex}_seed{seed}
+seed{seed}_phsp{phaseSpaceIndex}
 ```
 
 Generated filename rule:
 
 ```text
-input_sd{seed}_ps{phaseSpaceIndex}_n{nodeDigit}.txt
+seed{seed}_phsp{phaseSpaceIndex}.txt
 ```
 
 Output placeholder value:
 
 ```text
-{AppRoot}/runs/{runId}/dose
+{AppRoot}/runs/{seedBase}/{runId}
 ```
 
 ## Generate safety
@@ -105,7 +105,8 @@ Preflight checks:
 
 - input seed folder already contains files -> error
 - any planned generated input file already exists -> error
-- any planned run folder already exists -> error
+- run seed folder already contains files -> error
+- any planned output base path already exists (`path`, `path.csv`, `path.log`) -> error
 - any planned run ID already exists in SQLite -> error
 
 All-or-nothing behavior:
