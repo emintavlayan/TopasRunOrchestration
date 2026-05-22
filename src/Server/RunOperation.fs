@@ -1,6 +1,7 @@
 module RunOperation
 
 open System
+open System.IO
 open FsToolkit.ErrorHandling
 open Microsoft.Data.Sqlite
 open Shared
@@ -17,6 +18,10 @@ let private toConnectionString (settings: TsebtSettings) : string =
     let builder = SqliteConnectionStringBuilder()
     builder.DataSource <- databasePath
     builder.ConnectionString
+
+/// Resolves the absolute run batch folder path for a seed base.
+let private runBatchFolderPath (settings: TsebtSettings) (seedBase: string) : string =
+    Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase)
 
 /// Reads run batch summary rows from generated batch and run metadata.
 let private readRunBatchSummaries (connection: SqliteConnection) : Result<RunBatchSummary list, string> =
@@ -112,7 +117,7 @@ let private readRunManifestRows
     : Result<RunManifestRow list, string> =
     try
         use command = connection.CreateCommand()
-        command.CommandText <- "SELECT r.run_id, r.input_file_path, r.output_file_path, r.run_folder, r.seed, r.node_digit, r.phase_space_index FROM generated_runs r INNER JOIN generated_batches b ON b.id = r.batch_id WHERE b.seed_base = $seedBase ORDER BY r.run_id;"
+        command.CommandText <- "SELECT r.run_id, r.input_file_path, r.output_file_path, r.run_folder, r.seed, r.node_digit, r.phase_space_index FROM generated_runs r INNER JOIN generated_batches b ON b.id = r.batch_id WHERE b.seed_base = $seedBase ORDER BY r.id;"
         command.Parameters.AddWithValue("$seedBase", seedBase) |> ignore
         use reader = command.ExecuteReader()
         let rows = ResizeArray<RunManifestRow>()
@@ -148,26 +153,80 @@ let getRunBatchDetails (settings: TsebtSettings) (seedBase: string) : Result<Run
     with ex ->
         Error $"Failed loading run batch details: {ex.Message}"
 
-/// Returns preflight checks for a batch without submitting anything.
-let private preflightRun (details: RunBatchDetails) : RunPreflightResult =
-    let hasRows = details.GeneratedInputCount > 0
+/// Builds one preflight check result value.
+let private runCheck (name: string) (ok: bool) (message: string option) : RunPreflightCheck =
+    {
+        Name = name
+        Ok = ok
+        Message = if ok then None else message
+    }
+
+/// Returns true when all generated input files exist on disk.
+let private allInputFilesExist (rows: RunManifestRow list) : bool =
+    rows |> List.forall (fun row -> File.Exists row.InputFilePath)
+
+/// Returns true when no output base path exists yet.
+let private noOutputPathCollisions (rows: RunManifestRow list) : bool =
+    rows
+    |> List.exists (fun row -> File.Exists row.OutputFilePath || Directory.Exists row.OutputFilePath)
+    |> not
+
+/// Returns true when no output csv path exists yet.
+let private noOutputCsvCollisions (rows: RunManifestRow list) : bool =
+    rows |> List.exists (fun row -> File.Exists(row.OutputFilePath + ".csv")) |> not
+
+/// Returns true when no output log path exists yet.
+let private noOutputLogCollisions (rows: RunManifestRow list) : bool =
+    rows |> List.exists (fun row -> File.Exists(row.OutputFilePath + ".log")) |> not
+
+/// Evaluates Run preflight checks from batch metadata and generated rows.
+let private evaluatePreflight
+    (settings: TsebtSettings)
+    (details: RunBatchDetails)
+    : RunPreflightResult =
+    let hasRows = details.Rows |> List.isEmpty |> not
+    let isGeneratedStatus = String.Equals(details.RunStatus, "Generated", StringComparison.OrdinalIgnoreCase)
+    let noPreviousSlurmJob = details.SlurmJobId |> Option.isNone
+    let inputFilesOk = hasRows && allInputFilesExist details.Rows
+    let runFolderExists = Directory.Exists(runBatchFolderPath settings details.SeedBase)
+    let noOutputBaseCollisions = noOutputPathCollisions details.Rows
+    let noOutputCsv = noOutputCsvCollisions details.Rows
+    let noOutputLog = noOutputLogCollisions details.Rows
 
     let checks =
         [
-            {
-                Name = "Batch exists"
-                Ok = true
-                Message = None
-            }
-            {
-                Name = "Generated runs available"
-                Ok = hasRows
-                Message =
-                    if hasRows then
-                        None
-                    else
-                        Some "No generated runs were found for this seed base."
-            }
+            runCheck
+                "Generated runs found"
+                hasRows
+                (Some $"No generated runs were found for seed base: {details.SeedBase}")
+            runCheck
+                "Batch status is Generated"
+                isGeneratedStatus
+                (Some $"Run batch status must be Generated but was {details.RunStatus}.")
+            runCheck
+                "No previous Slurm job"
+                noPreviousSlurmJob
+                (Some "This run batch already has a Slurm job id.")
+            runCheck
+                "Input files exist"
+                inputFilesOk
+                (Some "One or more generated input files are missing.")
+            runCheck
+                "Run folder exists"
+                runFolderExists
+                (Some $"Run folder does not exist: {runBatchFolderPath settings details.SeedBase}")
+            runCheck
+                "No output collisions"
+                noOutputBaseCollisions
+                (Some "One or more output base paths already exist.")
+            runCheck
+                "No output CSV collisions"
+                noOutputCsv
+                (Some "One or more output csv files already exist.")
+            runCheck
+                "No log collisions"
+                noOutputLog
+                (Some "One or more output log files already exist.")
         ]
 
     {
@@ -176,22 +235,64 @@ let private preflightRun (details: RunBatchDetails) : RunPreflightResult =
         Checks = checks
     }
 
+/// Runs Run preflight checks by seed base.
+let preflightRun (settings: TsebtSettings) (seedBase: string) : Result<RunPreflightResult, string> =
+    result {
+        let! details = getRunBatchDetails settings seedBase
+        return evaluatePreflight settings details
+    }
+
+/// Builds Slurm script text for a run batch manifest.
+let private buildSlurmScriptText
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (manifestPath: string)
+    (rowCount: int)
+    : string =
+    let slurmOutputPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "slurm-%A_%a.out")
+
+    [
+        "#!/usr/bin/env bash"
+        $"#SBATCH --job-name=tsebt-{seedBase}"
+        $"#SBATCH --partition={settings.Slurm.Partition}"
+        $"#SBATCH --cpus-per-task={settings.Slurm.CpusPerTask}"
+        $"#SBATCH --array=1-{rowCount}"
+        $"#SBATCH --output={slurmOutputPath}"
+        ""
+        "set -euo pipefail"
+        ""
+        $"MANIFEST=\"{manifestPath}\""
+        "ROW=$(awk -F '\\t' -v task_id=\"$SLURM_ARRAY_TASK_ID\" '$1 == task_id { print; exit }' \"$MANIFEST\")"
+        "if [ -z \"$ROW\" ]; then"
+        "  echo \"Manifest row not found for task id $SLURM_ARRAY_TASK_ID\" >&2"
+        "  exit 1"
+        "fi"
+        "IFS=$'\\t' read -r TASK_ID NODE_NAME RUN_ID INPUT_FILE LOG_FILE <<< \"$ROW\""
+        $"\"{settings.Topas.Executable}\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1"
+    ]
+    |> String.concat "\n"
+
 /// Builds a run script preview payload from existing generated run metadata.
 let previewRun (settings: TsebtSettings) (seedBase: string) : Result<RunScriptPreview, string> =
     result {
         let! details = getRunBatchDetails settings seedBase
-        let preflight = preflightRun details
-        let manifestPath = $"{settings.Paths.Runs}/{seedBase}/manifest.txt"
-        let scriptPath = $"{settings.Paths.Runs}/{seedBase}/submit.sh"
+        let! preflight = preflightRun settings seedBase
+        let manifestPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "run_manifest.tsv")
+        let scriptPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "run_batch.slurm")
 
-        let scriptText =
-            [
-                "#!/usr/bin/env bash"
-                $"# seed base: {seedBase}"
-                $"# manifest: {manifestPath}"
-                "# Slurm submission is not implemented yet."
-            ]
-            |> String.concat "\n"
+        let manifestRows =
+            details.Rows
+            |> List.mapi (fun index row ->
+                {
+                    TaskId = index + 1
+                    NodeName = $"node{row.NodeDigit.PadLeft(2, '0')}"
+                    RunId = row.RunId
+                    InputFilePath = row.InputFilePath
+                    LogFilePath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, $"{row.RunId}.log")
+                })
+
+        let manifestRowsPreview = manifestRows |> List.truncate 20
+        let scriptText = buildSlurmScriptText settings seedBase manifestPath manifestRows.Length
 
         return
             {
@@ -200,6 +301,7 @@ let previewRun (settings: TsebtSettings) (seedBase: string) : Result<RunScriptPr
                 ScriptPath = scriptPath
                 ScriptText = scriptText
                 RunCount = details.GeneratedInputCount
+                ManifestRowsPreview = manifestRowsPreview
                 Preflight = preflight
             }
     }

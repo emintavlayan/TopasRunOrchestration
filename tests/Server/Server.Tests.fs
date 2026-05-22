@@ -128,6 +128,11 @@ let server =
                     Seed = "__SEED__"
                 }
                 Seed = { CurrentBase = "1001" }
+                Topas = { Executable = "topas" }
+                Slurm = {
+                    Partition = "compute"
+                    CpusPerTask = 1
+                }
                 Nodes = [ { Name = "node01"; Digit = "1" } ]
                 PhaseSpaceFiles = [
                     {
@@ -200,6 +205,11 @@ let server =
                     Seed = "__SEED__"
                 }
                 Seed = { CurrentBase = "1001" }
+                Topas = { Executable = "topas" }
+                Slurm = {
+                    Partition = "compute"
+                    CpusPerTask = 1
+                }
                 Nodes = [
                     { Name = "node01"; Digit = "1" }
                     { Name = "node02"; Digit = "2" }
@@ -257,6 +267,11 @@ let server =
                     Seed = "__SEED__"
                 }
                 Seed = { CurrentBase = "1001" }
+                Topas = { Executable = "topas" }
+                Slurm = {
+                    Partition = "compute"
+                    CpusPerTask = 1
+                }
                 Nodes = [ { Name = "node01"; Digit = "1" } ]
                 PhaseSpaceFiles = [
                     {

@@ -24,11 +24,20 @@ type TsebtPlaceholders = {
 
 type TsebtSeed = { CurrentBase: string }
 
+type TsebtTopas = { Executable: string }
+
+type TsebtSlurm = {
+    Partition: string
+    CpusPerTask: int
+}
+
 type TsebtSettings = {
     AppRoot: string
     Paths: TsebtPaths
     Placeholders: TsebtPlaceholders
     Seed: TsebtSeed
+    Topas: TsebtTopas
+    Slurm: TsebtSlurm
     Nodes: TsebtNode list
     PhaseSpaceFiles: TsebtPhaseSpaceFile list
 }
@@ -39,6 +48,23 @@ let private requireValue (cfg: IConfiguration) (key: string) : Result<string, st
     | null
     | "" -> Error $"Missing configuration value: {key}"
     | value -> Ok value
+
+/// Reads an optional string configuration value with fallback default.
+let private valueOrDefault (cfg: IConfiguration) (key: string) (fallback: string) : string =
+    match cfg.[key] with
+    | null
+    | "" -> fallback
+    | value -> value
+
+/// Reads an optional integer configuration value with fallback default.
+let private intOrDefault (cfg: IConfiguration) (key: string) (fallback: int) : int =
+    match cfg.[key] with
+    | null
+    | "" -> fallback
+    | value ->
+        match Int32.TryParse value with
+        | true, parsed -> parsed
+        | false, _ -> fallback
 
 /// Reads all configured nodes with name and digit.
 let private readNodes (cfg: IConfiguration) : Result<TsebtNode list, string> =
@@ -101,6 +127,9 @@ let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
     let! outputFilePlaceholder = requireValue cfg "Tsebt:Placeholders:OutputFile"
     let! seedPlaceholder = requireValue cfg "Tsebt:Placeholders:Seed"
     let! currentSeedBase = requireValue cfg "Tsebt:Seed:CurrentBase"
+    let topasExecutable = valueOrDefault cfg "Tsebt:Topas:Executable" "topas"
+    let slurmPartition = valueOrDefault cfg "Tsebt:Slurm:Partition" "compute"
+    let slurmCpusPerTask = intOrDefault cfg "Tsebt:Slurm:CpusPerTask" 1
     let! nodes = readNodes cfg
     let! phaseSpaceFiles = readPhaseSpaceFiles cfg
     let! _ = validateNonEmptyList "Tsebt:Nodes" nodes
@@ -124,6 +153,11 @@ let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
             Seed = seedPlaceholder
         }
         Seed = { CurrentBase = currentSeedBase }
+        Topas = { Executable = topasExecutable }
+        Slurm = {
+            Partition = slurmPartition
+            CpusPerTask = slurmCpusPerTask
+        }
         Nodes = nodes
         PhaseSpaceFiles = phaseSpaceFiles
     }

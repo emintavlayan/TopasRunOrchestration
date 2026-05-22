@@ -70,6 +70,14 @@ type RunManifestRow = {
     PhaseSpaceIndex: string
 }
 
+type RunManifestPreviewRow = {
+    TaskId: int
+    NodeName: string
+    RunId: string
+    InputFilePath: string
+    LogFilePath: string
+}
+
 type RunBatchDetails = {
     SeedBase: string
     CreatedAt: string
@@ -102,6 +110,7 @@ type RunScriptPreview = {
     ScriptPath: string
     ScriptText: string
     RunCount: int
+    ManifestRowsPreview: RunManifestPreviewRow list
     Preflight: RunPreflightResult
 }
 
