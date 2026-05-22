@@ -7,6 +7,7 @@ open Server
 open GenerateOperation
 open GeneratePlanning
 open RunOperation
+open CollectCsvMerge
 open TsebtConfig
 open SqliteInit
 open System
@@ -366,6 +367,60 @@ let server =
                 buildSlurmScriptText settings "1001" "/app/runs/1001/run_manifest.tsv" 4
 
             Expect.stringContains script "\"topas\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" "Script should execute TOPAS and redirect log output"
+
+        testCase "Collect csv merge sums last numeric dose column across node files"
+        <| fun _ ->
+            let folder = Path.Combine(Path.GetTempPath(), $"collect-merge-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(folder) |> ignore
+
+            let csvA = Path.Combine(folder, "node01.csv")
+            let csvB = Path.Combine(folder, "node02.csv")
+            let output = Path.Combine(folder, "phsp01_merged.csv")
+
+            File.WriteAllText(
+                csvA,
+                String.concat
+                    Environment.NewLine
+                    [ "# header"
+                      "x,y,dose"
+                      "0,0,1.0"
+                      "0,1,2.5" ]
+            )
+
+            File.WriteAllText(
+                csvB,
+                String.concat
+                    Environment.NewLine
+                    [ "# header"
+                      "x,y,dose"
+                      "0,0,3.0"
+                      "0,1,4.5" ]
+            )
+
+            let merged = mergeNodeCsvFilesForPhaseSpace [ csvA; csvB ] output
+            Expect.isOk merged "Merge should succeed for compatible csv files"
+            Expect.isTrue (File.Exists output) "Merged csv output file should be written"
+
+            let outputText = File.ReadAllText output
+            Expect.stringContains outputText "0,0,4" "First dose value should be summed to 4.0"
+            Expect.stringContains outputText "0,1,7" "Second dose value should be summed to 7.0"
+            Directory.Delete(folder, true)
+
+        testCase "Collect csv merge fails when row counts do not match"
+        <| fun _ ->
+            let folder = Path.Combine(Path.GetTempPath(), $"collect-merge-mismatch-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(folder) |> ignore
+
+            let csvA = Path.Combine(folder, "node01.csv")
+            let csvB = Path.Combine(folder, "node02.csv")
+            let output = Path.Combine(folder, "phsp01_merged.csv")
+
+            File.WriteAllText(csvA, String.concat Environment.NewLine [ "x,y,dose"; "0,0,1.0"; "0,1,2.0" ])
+            File.WriteAllText(csvB, String.concat Environment.NewLine [ "x,y,dose"; "0,0,1.5" ])
+
+            let merged = mergeNodeCsvFilesForPhaseSpace [ csvA; csvB ] output
+            Expect.isError merged "Merge should fail when csv row counts differ"
+            Directory.Delete(folder, true)
     ]
 
 let all = testList "All" [ Shared.Tests.shared; server ]
