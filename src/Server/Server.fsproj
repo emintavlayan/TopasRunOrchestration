@@ -18,6 +18,7 @@
     <Compile Include="CollectPlanning.fs" />
     <Compile Include="CollectPreflight.fs" />
     <Compile Include="CollectCsvMerge.fs" />
+    <Compile Include="CollectStatistics.fs" />
     <Compile Include="CollectOperation.fs" />
     <Compile Include="SqliteInit.fs" />
     <Compile Include="Server.fs" />

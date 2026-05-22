@@ -8,6 +8,7 @@ open GenerateOperation
 open GeneratePlanning
 open RunOperation
 open CollectCsvMerge
+open CollectStatistics
 open TsebtConfig
 open SqliteInit
 open System
@@ -420,6 +421,46 @@ let server =
 
             let merged = mergeNodeCsvFilesForPhaseSpace [ csvA; csvB ] output
             Expect.isError merged "Merge should fail when csv row counts differ"
+            Directory.Delete(folder, true)
+
+        testCase "Collect statistics computes mean median standard deviation and count"
+        <| fun _ ->
+            let folder = Path.Combine(Path.GetTempPath(), $"collect-stats-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(folder) |> ignore
+
+            let fileA = Path.Combine(folder, "phsp01_merged.csv")
+            let fileB = Path.Combine(folder, "phsp02_merged.csv")
+            let fileC = Path.Combine(folder, "phsp03_merged.csv")
+            let summary = Path.Combine(folder, "dose_summary.csv")
+
+            File.WriteAllText(fileA, String.concat Environment.NewLine [ "x,y,dose"; "0,0,1.0"; "0,1,2.0" ])
+            File.WriteAllText(fileB, String.concat Environment.NewLine [ "x,y,dose"; "0,0,3.0"; "0,1,4.0" ])
+            File.WriteAllText(fileC, String.concat Environment.NewLine [ "x,y,dose"; "0,0,5.0"; "0,1,6.0" ])
+
+            let result = computeDoseSummary [ fileA; fileB; fileC ] summary
+            Expect.isOk result "Summary computation should succeed for aligned merged files"
+            Expect.isTrue (File.Exists summary) "Summary output file should be written"
+
+            let lines = File.ReadAllLines summary
+            Expect.equal lines[0] "x,y,mean,median,standard_deviation,count" "Header should include summary columns"
+            Expect.stringContains lines[1] ",3,3,2,3" "First voxel should have mean=3 median=3 sd=2 count=3"
+            Expect.stringContains lines[2] ",4,4,2,3" "Second voxel should have mean=4 median=4 sd=2 count=3"
+            Directory.Delete(folder, true)
+
+        testCase "Collect statistics fails when merged csv row counts do not match"
+        <| fun _ ->
+            let folder = Path.Combine(Path.GetTempPath(), $"collect-stats-mismatch-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(folder) |> ignore
+
+            let fileA = Path.Combine(folder, "phsp01_merged.csv")
+            let fileB = Path.Combine(folder, "phsp02_merged.csv")
+            let summary = Path.Combine(folder, "dose_summary.csv")
+
+            File.WriteAllText(fileA, String.concat Environment.NewLine [ "x,y,dose"; "0,0,1.0"; "0,1,2.0" ])
+            File.WriteAllText(fileB, String.concat Environment.NewLine [ "x,y,dose"; "0,0,3.0" ])
+
+            let result = computeDoseSummary [ fileA; fileB ] summary
+            Expect.isError result "Summary computation should fail for mismatched row counts"
             Directory.Delete(folder, true)
     ]
 
