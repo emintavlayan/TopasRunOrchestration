@@ -47,6 +47,17 @@ let private ensureRunFoundationColumns (connection: SqliteConnection) : unit =
     ensureGeneratedBatchColumn connection "script_path" "TEXT NULL"
     ensureGeneratedBatchColumn connection "submitted_at" "TEXT NULL"
 
+/// Ensures collect foundation columns exist in generated_batches for backward-compatible databases.
+let private ensureCollectFoundationColumns (connection: SqliteConnection) : unit =
+    ensureGeneratedBatchColumn connection "collect_status" "TEXT NOT NULL DEFAULT 'NotCollected'"
+    ensureGeneratedBatchColumn connection "collected_at" "TEXT NULL"
+    ensureGeneratedBatchColumn connection "collect_output_folder" "TEXT NULL"
+    ensureGeneratedBatchColumn connection "collect_summary_path" "TEXT NULL"
+    ensureGeneratedBatchColumn connection "collect_csv_found_count" "INTEGER NULL"
+    ensureGeneratedBatchColumn connection "collect_csv_missing_count" "INTEGER NULL"
+    ensureGeneratedBatchColumn connection "collect_log_found_count" "INTEGER NULL"
+    ensureGeneratedBatchColumn connection "collect_log_missing_count" "INTEGER NULL"
+
 /// Initializes SQLite file and required tables if missing.
 let initialize (settings: TsebtSettings) : Result<string, string> =
     let databasePath = getDatabasePath settings
@@ -68,7 +79,15 @@ let initialize (settings: TsebtSettings) : Result<string, string> =
   slurm_job_id TEXT NULL,
   manifest_path TEXT NULL,
   script_path TEXT NULL,
-  submitted_at TEXT NULL
+  submitted_at TEXT NULL,
+  collect_status TEXT NOT NULL DEFAULT 'NotCollected',
+  collected_at TEXT NULL,
+  collect_output_folder TEXT NULL,
+  collect_summary_path TEXT NULL,
+  collect_csv_found_count INTEGER NULL,
+  collect_csv_missing_count INTEGER NULL,
+  collect_log_found_count INTEGER NULL,
+  collect_log_missing_count INTEGER NULL
 );"""
 
         executeNonQuery
@@ -91,6 +110,7 @@ let initialize (settings: TsebtSettings) : Result<string, string> =
 );"""
 
         ensureRunFoundationColumns connection
+        ensureCollectFoundationColumns connection
 
         Ok databasePath
     with ex ->

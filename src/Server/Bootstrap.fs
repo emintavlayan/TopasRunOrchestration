@@ -15,6 +15,7 @@ let ensureRootFolders (settings: TsebtSettings) : Result<unit, string> =
                 settings.Paths.Templates
                 settings.Paths.Inputs
                 settings.Paths.Runs
+                settings.Paths.Outputs
                 Path.GetDirectoryName(settings.Paths.Database)
                 settings.Paths.Logs
             ]

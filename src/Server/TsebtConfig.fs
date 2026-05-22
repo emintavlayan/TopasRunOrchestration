@@ -12,6 +12,7 @@ type TsebtPaths = {
     Templates: string
     Inputs: string
     Runs: string
+    Outputs: string
     Database: string
     Logs: string
 }
@@ -121,6 +122,7 @@ let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
     let! templates = requireValue cfg "Tsebt:Paths:Templates"
     let! inputs = requireValue cfg "Tsebt:Paths:Inputs"
     let! runs = requireValue cfg "Tsebt:Paths:Runs"
+    let! outputs = requireValue cfg "Tsebt:Paths:Outputs"
     let! database = requireValue cfg "Tsebt:Paths:Database"
     let! logs = requireValue cfg "Tsebt:Paths:Logs"
     let! phaseSpaceFilePlaceholder = requireValue cfg "Tsebt:Placeholders:PhaseSpaceFile"
@@ -144,6 +146,7 @@ let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
             Templates = templates
             Inputs = inputs
             Runs = runs
+            Outputs = outputs
             Database = database
             Logs = logs
         }

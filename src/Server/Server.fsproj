@@ -15,6 +15,7 @@
     <Compile Include="GeneratePreview.fs" />
     <Compile Include="GenerateOperation.fs" />
     <Compile Include="RunOperation.fs" />
+    <Compile Include="CollectOperation.fs" />
     <Compile Include="SqliteInit.fs" />
     <Compile Include="Server.fs" />
     <Content Update="appsettings.json">

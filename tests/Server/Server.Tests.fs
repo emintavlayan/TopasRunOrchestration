@@ -21,6 +21,7 @@ let private buildValidConfig () =
             "Tsebt:Paths:Templates", "templates"
             "Tsebt:Paths:Inputs", "inputs"
             "Tsebt:Paths:Runs", "runs"
+            "Tsebt:Paths:Outputs", "outputs"
             "Tsebt:Paths:Database", "database\\app.db"
             "Tsebt:Paths:Logs", "logs"
             "Tsebt:Placeholders:PhaseSpaceFile", "__PHSP_FILE__"
@@ -120,6 +121,7 @@ let server =
                     Templates = "templates"
                     Inputs = "inputs"
                     Runs = "runs"
+                    Outputs = "outputs"
                     Database = "database\\app.db"
                     Logs = "logs"
                 }
@@ -197,6 +199,7 @@ let server =
                     Templates = "templates"
                     Inputs = "inputs"
                     Runs = "runs"
+                    Outputs = "outputs"
                     Database = "database\\app.db"
                     Logs = "logs"
                 }
@@ -259,6 +262,7 @@ let server =
                     Templates = "templates"
                     Inputs = "inputs"
                     Runs = "runs"
+                    Outputs = "outputs"
                     Database = "database\\app.db"
                     Logs = "logs"
                 }
@@ -339,6 +343,7 @@ let server =
                     Templates = "templates"
                     Inputs = "inputs"
                     Runs = "runs"
+                    Outputs = "outputs"
                     Database = "database/app.db"
                     Logs = "logs"
                 }

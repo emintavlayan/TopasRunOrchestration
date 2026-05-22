@@ -127,6 +127,92 @@ type SubmitRunResult = {
     SubmittedAt: string
 }
 
+type CollectBatchSummary = {
+    SeedBase: string
+    CreatedAt: string
+    GeneratedRunCount: int
+    NodeCount: int
+    PhaseSpaceCount: int
+    RunStatus: string option
+    CollectStatus: string
+    CollectSummaryPath: string option
+}
+
+type CollectBatchDetails = {
+    SeedBase: string
+    CreatedAt: string
+    GeneratedRunCount: int
+    NodeCount: int
+    PhaseSpaceCount: int
+    RunStatus: string option
+    CollectStatus: string
+    CollectedAt: string option
+    CollectOutputFolder: string option
+    CollectSummaryPath: string option
+    CollectCsvFoundCount: int option
+    CollectCsvMissingCount: int option
+    CollectLogFoundCount: int option
+    CollectLogMissingCount: int option
+}
+
+type CollectPreflightCheck = {
+    Name: string
+    Ok: bool
+    Message: string option
+}
+
+type MissingCollectFile = {
+    FileKind: string
+    Path: string
+}
+
+type CollectPreflightResult = {
+    SeedBase: string
+    CanCollect: bool
+    ExpectedRunCount: int
+    FoundCsvCount: int
+    MissingCsvCount: int
+    FoundLogCount: int
+    MissingLogCount: int
+    Checks: CollectPreflightCheck list
+    MissingFiles: MissingCollectFile list
+}
+
+type CollectPreviewRequest = { SeedBase: string }
+
+type CollectPreviewResult = {
+    SeedBase: string
+    ExpectedRunCount: int
+    PhaseSpaceCount: int
+    NodeCount: int
+    OutputFolder: string
+    PlannedMergedFiles: string list
+    FinalSummaryPath: string
+    ManifestPath: string
+    Preflight: CollectPreflightResult
+}
+
+type CollectRequest = { SeedBase: string }
+
+type CollectedPhaseSpaceResult = {
+    PhaseSpaceIndex: string
+    MergedFilePath: string
+    SourceCsvCount: int
+}
+
+type CollectResult = {
+    SeedBase: string
+    ExpectedRunCount: int
+    CsvReadCount: int
+    LogFoundCount: int
+    MergedPhaseSpaceCount: int
+    OutputFolder: string
+    SummaryPath: string
+    MergedFiles: CollectedPhaseSpaceResult list
+    ManifestPath: string
+    Status: string
+}
+
 type AppConfigView = {
     AppRoot: string
     SeedBase: string
@@ -144,4 +230,8 @@ type ITopasApi = {
     getRunBatchDetails: string -> Async<Result<RunBatchDetails, string>>
     previewRun: string -> Async<Result<RunScriptPreview, string>>
     submitRun: SubmitRunRequest -> Async<Result<SubmitRunResult, string>>
+    getCollectBatches: unit -> Async<Result<CollectBatchSummary list, string>>
+    getCollectBatchDetails: string -> Async<Result<CollectBatchDetails, string>>
+    previewCollect: CollectPreviewRequest -> Async<Result<CollectPreviewResult, string>>
+    collectBatch: CollectRequest -> Async<Result<CollectResult, string>>
 }

@@ -125,6 +125,38 @@ let private submitRunHandler (request: SubmitRunRequest) : Async<Result<SubmitRu
     }
 }
 
+/// Returns collect batch summaries from persisted generated metadata.
+let private getCollectBatchesHandler () : Async<Result<CollectBatchSummary list, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! CollectOperation.getCollectBatches settings
+    }
+}
+
+/// Returns detailed collect batch data by seed base identifier.
+let private getCollectBatchDetailsHandler (seedBase: string) : Async<Result<CollectBatchDetails, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! CollectOperation.getCollectBatchDetails settings seedBase
+    }
+}
+
+/// Returns collect preview for one generated batch.
+let private previewCollectHandler (request: CollectPreviewRequest) : Async<Result<CollectPreviewResult, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! CollectOperation.previewCollect settings request
+    }
+}
+
+/// Executes collect workflow for one generated batch.
+let private collectBatchHandler (request: CollectRequest) : Async<Result<CollectResult, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! CollectOperation.collectBatch settings request
+    }
+}
+
 /// Exposes the temporary TSEBT API skeleton.
 let topasApi (_: HttpContext) : ITopasApi = {
     getAppConfig = getAppConfigHandler
@@ -135,6 +167,10 @@ let topasApi (_: HttpContext) : ITopasApi = {
     getRunBatchDetails = getRunBatchDetailsHandler
     previewRun = previewRunHandler
     submitRun = submitRunHandler
+    getCollectBatches = getCollectBatchesHandler
+    getCollectBatchDetails = getCollectBatchDetailsHandler
+    previewCollect = previewCollectHandler
+    collectBatch = collectBatchHandler
 }
 
 /// Creates the remoting web app for TSEBT API endpoints.
