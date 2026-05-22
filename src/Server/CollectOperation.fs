@@ -8,6 +8,9 @@ open TsebtConfig
 open Bootstrap
 open CollectPlanning
 open CollectPreflight
+open CollectCsvMerge
+open CollectStatistics
+open System.IO
 
 /// Returns nullable database values as optional strings.
 let private asOptionalString (value: obj) : string option =
@@ -216,6 +219,168 @@ let previewCollect (settings: TsebtSettings) (request: CollectPreviewRequest) : 
     with ex ->
         Error $"Failed building collect preview: {ex.Message}"
 
-/// Returns not-implemented response for collect operation during foundation phase.
-let collectBatch (_settings: TsebtSettings) (_request: CollectRequest) : Result<CollectResult, string> =
-    Error "Collect operation is not implemented yet."
+/// Builds collect manifest lines from generated run rows.
+let private buildCollectManifestLines (rows: CollectRunRow list) : string list =
+    let header = "runId\tphaseSpaceIndex\tnodeDigit\tcsvPath\tlogPath"
+
+    let lines =
+        rows
+        |> List.map (fun row ->
+            let csvPath, logPath = expectedCsvAndLogPaths row
+            $"{row.RunId}\t{row.PhaseSpaceIndex}\t{row.NodeDigit}\t{csvPath}\t{logPath}")
+
+    header :: lines
+
+/// Returns true when folder exists and contains at least one file.
+let private folderHasFiles (folderPath: string) : bool =
+    Directory.Exists folderPath
+    && Directory.EnumerateFileSystemEntries(folderPath, "*", SearchOption.TopDirectoryOnly)
+        |> Seq.isEmpty
+        |> not
+
+/// Validates output collision rules before collect writes any files.
+let private validateCollectOutputCollisions
+    (outputFolder: string)
+    (plannedMergedFilesList: string list)
+    (summaryPath: string)
+    (manifestPath: string)
+    : Result<unit, string> =
+    if folderHasFiles outputFolder then
+        Error $"Collect output folder already exists and is not empty: {outputFolder}"
+    elif plannedMergedFilesList |> List.exists File.Exists then
+        Error "One or more planned merged csv files already exist."
+    elif File.Exists summaryPath then
+        Error $"Summary output file already exists: {summaryPath}"
+    elif File.Exists manifestPath then
+        Error $"Collect manifest file already exists: {manifestPath}"
+    else
+        Ok()
+
+/// Writes collect manifest file for one seed base.
+let private writeCollectManifest (manifestPath: string) (manifestLines: string list) : Result<unit, string> =
+    try
+        let parent = Path.GetDirectoryName manifestPath
+
+        if not (String.IsNullOrWhiteSpace parent) then
+            Directory.CreateDirectory(parent) |> ignore
+
+        File.WriteAllLines(manifestPath, manifestLines)
+        Ok()
+    with ex ->
+        Error $"Failed writing collect manifest: {ex.Message}"
+
+/// Merges node csv files grouped by phase-space index.
+let private mergePhaseSpaceCsvFiles
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (rows: CollectRunRow list)
+    : Result<CollectedPhaseSpaceResult list, string> =
+    rows
+    |> List.groupBy _.PhaseSpaceIndex
+    |> List.sortBy fst
+    |> List.map (fun (phaseSpaceIndex, phaseRows) ->
+        let csvInputPaths =
+            phaseRows
+            |> List.map expectedCsvAndLogPaths
+            |> List.map fst
+            |> List.distinct
+
+        let outputPath = Path.Combine(outputFolderPath settings seedBase, $"phsp{phaseSpaceIndex}_merged.csv")
+
+        result {
+            do! mergeNodeCsvFilesForPhaseSpace csvInputPaths outputPath
+
+            return
+                {
+                    PhaseSpaceIndex = phaseSpaceIndex
+                    MergedFilePath = outputPath
+                    SourceCsvCount = csvInputPaths.Length
+                }
+        })
+    |> List.sequenceResultM
+
+/// Updates collect metadata columns in generated_batches after successful collect.
+let private updateCollectedBatchMetadata
+    (connection: SqliteConnection)
+    (seedBase: string)
+    (outputFolder: string)
+    (summaryPath: string)
+    (preflight: CollectPreflightResult)
+    : Result<string, string> =
+    try
+        let collectedAt = DateTime.UtcNow.ToString("O")
+        use command = connection.CreateCommand()
+
+        command.CommandText <-
+            "UPDATE generated_batches SET collect_status = $collectStatus, collected_at = $collectedAt, collect_output_folder = $collectOutputFolder, collect_summary_path = $collectSummaryPath, collect_csv_found_count = $collectCsvFoundCount, collect_csv_missing_count = $collectCsvMissingCount, collect_log_found_count = $collectLogFoundCount, collect_log_missing_count = $collectLogMissingCount WHERE seed_base = $seedBase;"
+
+        command.Parameters.AddWithValue("$collectStatus", "Collected") |> ignore
+        command.Parameters.AddWithValue("$collectedAt", collectedAt) |> ignore
+        command.Parameters.AddWithValue("$collectOutputFolder", outputFolder) |> ignore
+        command.Parameters.AddWithValue("$collectSummaryPath", summaryPath) |> ignore
+        command.Parameters.AddWithValue("$collectCsvFoundCount", preflight.FoundCsvCount) |> ignore
+        command.Parameters.AddWithValue("$collectCsvMissingCount", preflight.MissingCsvCount) |> ignore
+        command.Parameters.AddWithValue("$collectLogFoundCount", preflight.FoundLogCount) |> ignore
+        command.Parameters.AddWithValue("$collectLogMissingCount", preflight.MissingLogCount) |> ignore
+        command.Parameters.AddWithValue("$seedBase", seedBase) |> ignore
+
+        let affected = command.ExecuteNonQuery()
+
+        if affected = 0 then
+            Error $"Collect batch not found for seed base: {seedBase}"
+        else
+            Ok collectedAt
+    with ex ->
+        Error $"Failed updating collect metadata: {ex.Message}"
+
+/// Executes full collect operation for one seed base.
+let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<CollectResult, string> =
+    try
+        use connection = new SqliteConnection(toConnectionString settings)
+        connection.Open()
+
+        result {
+            let! details = getCollectBatchDetails settings request.SeedBase
+
+            if String.Equals(details.CollectStatus, "Collected", StringComparison.OrdinalIgnoreCase) then
+                return! Error $"Batch {request.SeedBase} has already been collected."
+
+            let! rows = readCollectRunRows connection request.SeedBase
+            let preflight = buildCollectPreflightResult settings request.SeedBase rows
+
+            if not preflight.CanCollect then
+                return! Error $"Collect preflight failed for seed base: {request.SeedBase}"
+
+            let outputFolder = outputFolderPath settings request.SeedBase
+            let summaryPath = plannedSummaryPath settings request.SeedBase
+            let manifestPath = plannedManifestPath settings request.SeedBase
+            let plannedMergedFilesList = plannedMergedFiles settings request.SeedBase rows
+
+            do! validateCollectOutputCollisions outputFolder plannedMergedFilesList summaryPath manifestPath
+
+            let manifestLines = buildCollectManifestLines rows
+            do! writeCollectManifest manifestPath manifestLines
+
+            let! mergedFiles = mergePhaseSpaceCsvFiles settings request.SeedBase rows
+            let mergedPaths = mergedFiles |> List.map _.MergedFilePath
+            do! computeDoseSummary mergedPaths summaryPath
+
+            let! _collectedAt =
+                updateCollectedBatchMetadata connection request.SeedBase outputFolder summaryPath preflight
+
+            return
+                {
+                    SeedBase = request.SeedBase
+                    ExpectedRunCount = preflight.ExpectedRunCount
+                    CsvReadCount = preflight.FoundCsvCount
+                    LogFoundCount = preflight.FoundLogCount
+                    MergedPhaseSpaceCount = mergedFiles.Length
+                    OutputFolder = outputFolder
+                    SummaryPath = summaryPath
+                    MergedFiles = mergedFiles
+                    ManifestPath = manifestPath
+                    Status = "Collected"
+                }
+        }
+    with ex ->
+        Error $"Failed executing collect operation: {ex.Message}"
