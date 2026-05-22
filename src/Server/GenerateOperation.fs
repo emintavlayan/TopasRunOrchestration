@@ -296,7 +296,7 @@ let generate (settings: TsebtSettings) (seedBase: string) (request: GenerateRequ
     let inputFolder =
         buildInputFolderPath settings seedBase
 
-    let generatedRuns =
+    let generatedRuns : GeneratedRunInfo list =
         plannedRuns
         |> List.map (fun run -> {
             RunId = run.RunId

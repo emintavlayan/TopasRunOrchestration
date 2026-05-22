@@ -93,12 +93,48 @@ let private generateHandler (request: GenerateRequest) : Async<Result<GenerateRe
     }
 }
 
+/// Returns run batch summaries from persisted generated metadata.
+let private getRunBatchesHandler () : Async<Result<RunBatchSummary list, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! RunOperation.getRunBatches settings
+    }
+}
+
+/// Returns detailed run batch data by seed base identifier.
+let private getRunBatchDetailsHandler (seedBase: string) : Async<Result<RunBatchDetails, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! RunOperation.getRunBatchDetails settings seedBase
+    }
+}
+
+/// Returns run script preview and preflight for a seed base.
+let private previewRunHandler (seedBase: string) : Async<Result<RunScriptPreview, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! RunOperation.previewRun settings seedBase
+    }
+}
+
+/// Stores submit metadata foundation without Slurm orchestration.
+let private submitRunHandler (request: SubmitRunRequest) : Async<Result<SubmitRunResult, string>> = async {
+    return result {
+        let! settings = loadSettings ()
+        return! RunOperation.submitRun settings request
+    }
+}
+
 /// Exposes the temporary TSEBT API skeleton.
 let topasApi (_: HttpContext) : ITopasApi = {
     getAppConfig = getAppConfigHandler
     getTemplateFiles = getTemplateFilesHandler
     previewGenerate = previewGenerateHandler
     generate = generateHandler
+    getRunBatches = getRunBatchesHandler
+    getRunBatchDetails = getRunBatchDetailsHandler
+    previewRun = previewRunHandler
+    submitRun = submitRunHandler
 }
 
 /// Creates the remoting web app for TSEBT API endpoints.

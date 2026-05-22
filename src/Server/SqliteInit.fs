@@ -1,5 +1,6 @@
 module SqliteInit
 
+open System
 open Microsoft.Data.Sqlite
 open TsebtConfig
 open Bootstrap
@@ -13,6 +14,38 @@ let private executeNonQuery (connection: SqliteConnection) (sql: string) : unit 
     use command = connection.CreateCommand()
     command.CommandText <- sql
     command.ExecuteNonQuery() |> ignore
+
+/// Returns true when the given table has the given column name.
+let private hasColumn (connection: SqliteConnection) (tableName: string) (columnName: string) : bool =
+    use command = connection.CreateCommand()
+    command.CommandText <- $"PRAGMA table_info({tableName});"
+    use reader = command.ExecuteReader()
+    let mutable found = false
+
+    while reader.Read() && not found do
+        let currentName = reader.GetString(1)
+
+        if String.Equals(currentName, columnName, StringComparison.OrdinalIgnoreCase) then
+            found <- true
+
+    found
+
+/// Adds a column to generated_batches only when it does not already exist.
+let private ensureGeneratedBatchColumn
+    (connection: SqliteConnection)
+    (columnName: string)
+    (columnSqlTypeAndDefault: string)
+    : unit =
+    if not (hasColumn connection "generated_batches" columnName) then
+        executeNonQuery connection $"ALTER TABLE generated_batches ADD COLUMN {columnName} {columnSqlTypeAndDefault};"
+
+/// Ensures run foundation columns exist in generated_batches for backward-compatible databases.
+let private ensureRunFoundationColumns (connection: SqliteConnection) : unit =
+    ensureGeneratedBatchColumn connection "run_status" "TEXT NOT NULL DEFAULT 'Generated'"
+    ensureGeneratedBatchColumn connection "slurm_job_id" "TEXT NULL"
+    ensureGeneratedBatchColumn connection "manifest_path" "TEXT NULL"
+    ensureGeneratedBatchColumn connection "script_path" "TEXT NULL"
+    ensureGeneratedBatchColumn connection "submitted_at" "TEXT NULL"
 
 /// Initializes SQLite file and required tables if missing.
 let initialize (settings: TsebtSettings) : Result<string, string> =
@@ -30,7 +63,12 @@ let initialize (settings: TsebtSettings) : Result<string, string> =
             """CREATE TABLE IF NOT EXISTS generated_batches (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   seed_base TEXT NOT NULL,
-  created_at TEXT NOT NULL
+  created_at TEXT NOT NULL,
+  run_status TEXT NOT NULL DEFAULT 'Generated',
+  slurm_job_id TEXT NULL,
+  manifest_path TEXT NULL,
+  script_path TEXT NULL,
+  submitted_at TEXT NULL
 );"""
 
         executeNonQuery
@@ -51,6 +89,8 @@ let initialize (settings: TsebtSettings) : Result<string, string> =
   created_at TEXT NOT NULL,
   FOREIGN KEY (batch_id) REFERENCES generated_batches(id)
 );"""
+
+        ensureRunFoundationColumns connection
 
         Ok databasePath
     with ex ->

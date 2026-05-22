@@ -50,6 +50,72 @@ type GenerateResult = {
     GeneratedRuns: GeneratedRunInfo list
 }
 
+type RunBatchSummary = {
+    SeedBase: string
+    CreatedAt: string
+    GeneratedInputCount: int
+    NodeCount: int
+    PhaseSpaceCount: int
+    RunStatus: string
+    SlurmJobId: string option
+}
+
+type RunManifestRow = {
+    RunId: string
+    InputFilePath: string
+    OutputFilePath: string
+    RunFolder: string
+    Seed: string
+    NodeDigit: string
+    PhaseSpaceIndex: string
+}
+
+type RunBatchDetails = {
+    SeedBase: string
+    CreatedAt: string
+    GeneratedInputCount: int
+    NodeCount: int
+    PhaseSpaceCount: int
+    RunStatus: string
+    SlurmJobId: string option
+    ManifestPath: string option
+    ScriptPath: string option
+    SubmittedAt: string option
+    Rows: RunManifestRow list
+}
+
+type RunPreflightCheck = {
+    Name: string
+    Ok: bool
+    Message: string option
+}
+
+type RunPreflightResult = {
+    SeedBase: string
+    CanSubmit: bool
+    Checks: RunPreflightCheck list
+}
+
+type RunScriptPreview = {
+    SeedBase: string
+    ManifestPath: string
+    ScriptPath: string
+    ScriptText: string
+    RunCount: int
+    Preflight: RunPreflightResult
+}
+
+type SubmitRunRequest = { SeedBase: string }
+
+type SubmitRunResult = {
+    SeedBase: string
+    RunStatus: string
+    SlurmJobId: string option
+    ManifestPath: string option
+    ScriptPath: string option
+    SubmittedAt: string option
+}
+
 type AppConfigView = {
     AppRoot: string
     SeedBase: string
@@ -63,4 +129,8 @@ type ITopasApi = {
     getTemplateFiles: unit -> Async<Result<TemplateFileInfo list, string>>
     previewGenerate: GeneratePreviewRequest -> Async<Result<GeneratePreviewResult, string>>
     generate: GenerateRequest -> Async<Result<GenerateResult, string>>
+    getRunBatches: unit -> Async<Result<RunBatchSummary list, string>>
+    getRunBatchDetails: string -> Async<Result<RunBatchDetails, string>>
+    previewRun: string -> Async<Result<RunScriptPreview, string>>
+    submitRun: SubmitRunRequest -> Async<Result<SubmitRunResult, string>>
 }
