@@ -4,6 +4,7 @@ open Feliz
 open GenerateLogic
 open GenerateTypes
 open GenerateViews
+open RunViews
 
 /// Returns classes for underline-style tabs in selected/unselected state.
 let tabButtonClass (isSelected: bool) =
@@ -22,9 +23,6 @@ let tabButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
         prop.onClick (fun _ -> dispatch (SelectPage page))
     ]
 
-/// Renders the Run page placeholder.
-let viewRunPage () = Html.p "Run: Not implemented."
-
 /// Renders the Collect page placeholder.
 let viewCollectPage () = Html.p "Collect: Not implemented."
 
@@ -32,7 +30,7 @@ let viewCollectPage () = Html.p "Collect: Not implemented."
 let viewPageContent (model: Model) (dispatch: Msg -> unit) =
     match model.SelectedPage with
     | Generate -> viewGeneratePage model.Generate dispatch
-    | Run -> viewRunPage ()
+    | Run -> viewRunPage model.Run dispatch
     | Collect -> viewCollectPage ()
 
 /// Renders the client landing page and selected content.

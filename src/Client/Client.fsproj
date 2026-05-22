@@ -11,7 +11,9 @@
         <None Include="paket.references" />
         <Compile Include="GenerateTypes.fs" />
         <Compile Include="GenerateLogic.fs" />
+        <Compile Include="RunLogic.fs" />
         <Compile Include="GenerateViews.fs" />
+        <Compile Include="RunViews.fs" />
         <Compile Include="PageViews.fs" />
         <Compile Include="Index.fs" />
         <Compile Include="App.fs" />

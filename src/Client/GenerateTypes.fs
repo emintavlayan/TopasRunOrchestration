@@ -18,6 +18,14 @@ type GenerateStep =
     | Review
     | Result
 
+/// Represents the steps in the run wizard flow.
+type RunStep =
+    | RunWelcome
+    | SelectBatch
+    | PreflightReview
+    | SlurmScriptReview
+    | RunResult
+
 /// Represents the state of the generate wizard.
 type GenerateModel = {
     Step: GenerateStep
@@ -31,10 +39,21 @@ type GenerateModel = {
     Error: string option
 }
 
+/// Represents the state of the run wizard.
+type RunModel = {
+    Step: RunStep
+    Batches: RemoteData<RunBatchSummary list>
+    SelectedSeedBase: string option
+    Preview: RemoteData<RunScriptPreview>
+    SubmitResult: RemoteData<SubmitRunResult>
+    Error: string option
+}
+
 /// Represents the root client model.
 type Model = {
     SelectedPage: Page
     Generate: GenerateModel
+    Run: RunModel
 }
 
 /// Represents messages that can update the client model.
@@ -55,3 +74,11 @@ type Msg =
     | SelectNoPhaseSpaceFiles
     | LoadPreview of ApiCall<GeneratePreviewRequest, Result<GeneratePreviewResult, string>>
     | RunGenerate of ApiCall<GenerateRequest, Result<GenerateResult, string>>
+    | StartRunWizard
+    | CancelRunWizard
+    | PreviousRunStep
+    | NextRunStep
+    | SelectRunBatch of string
+    | LoadRunBatches of ApiCall<unit, Result<RunBatchSummary list, string>>
+    | LoadRunPreview of ApiCall<string, Result<RunScriptPreview, string>>
+    | SubmitRunBatch of ApiCall<SubmitRunRequest, Result<SubmitRunResult, string>>
