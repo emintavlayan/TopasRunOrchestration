@@ -19,15 +19,17 @@ Implemented:
 - Real generation of stitched TOPAS input files.
 - SQLite metadata insertion for generated batches and runs.
 - Collision-safe Generate preflight (input folder, generated input files, run folders, duplicate run IDs).
+- Run wizard UI.
+- Run preflight, Slurm script preview, and `sbatch` submission.
+- Collect wizard UI.
+- Collect preflight and preview.
+- Per-phase-space node CSV merge.
+- Final dose summary statistics (mean, median, standard deviation, count).
+- Collect operation with SQLite metadata updates.
 - Basic automated tests for Generate rules and collision preflight.
 
 Not implemented yet:
 
-- Run workflow.
-- Slurm submission / execution orchestration.
-- Collect workflow.
-- Dose CSV merging.
-- Statistics across phase-space files.
 - History / batch browser UI.
 - Production systemd service setup.
 
@@ -57,6 +59,7 @@ Expected folders under `AppRoot`:
 templates/   TOPAS source template/component files
 inputs/      generated TOPAS input files
 runs/        TOPAS output/run folders referenced by generated inputs
+outputs/     collect outputs per seed base (merged csv + dose summary)
 database/    SQLite database
 logs/        application/runtime logs
 ```
@@ -139,4 +142,5 @@ See:
 
 - `docs/app-behaviour-spec.md`
 - `docs/generate-behaviour-spec.md`
+- `docs/collect-behaviour-spec.md`
 - `docs/generate-wizard-ux-spec.md`
