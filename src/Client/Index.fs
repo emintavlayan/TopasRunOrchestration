@@ -4,6 +4,7 @@ open Elmish
 open GenerateLogic
 open GenerateTypes
 open RunLogic
+open CollectLogic
 open SAFE
 open Shared
 
@@ -35,6 +36,11 @@ let SelectBatch = GenerateTypes.RunStep.SelectBatch
 let PreflightReview = GenerateTypes.RunStep.PreflightReview
 let SlurmScriptReview = GenerateTypes.RunStep.SlurmScriptReview
 let RunResult = GenerateTypes.RunStep.RunResult
+let CollectWelcome = GenerateTypes.CollectStep.CollectWelcome
+let CollectSelectBatch = GenerateTypes.CollectStep.CollectSelectBatch
+let CollectPreflightReview = GenerateTypes.CollectStep.CollectPreflightReview
+let CollectMergeReview = GenerateTypes.CollectStep.CollectMergeReview
+let CollectResult = GenerateTypes.CollectStep.CollectResult
 
 let SelectPage = GenerateTypes.Msg.SelectPage
 let LoadAppConfig = GenerateTypes.Msg.LoadAppConfig
@@ -60,6 +66,14 @@ let SelectRunBatch = GenerateTypes.Msg.SelectRunBatch
 let LoadRunBatches = GenerateTypes.Msg.LoadRunBatches
 let LoadRunPreview = GenerateTypes.Msg.LoadRunPreview
 let SubmitRunBatch = GenerateTypes.Msg.SubmitRunBatch
+let StartCollectWizard = GenerateTypes.Msg.StartCollectWizard
+let CancelCollectWizard = GenerateTypes.Msg.CancelCollectWizard
+let PreviousCollectStep = GenerateTypes.Msg.PreviousCollectStep
+let NextCollectStep = GenerateTypes.Msg.NextCollectStep
+let SelectCollectBatch = GenerateTypes.Msg.SelectCollectBatch
+let LoadCollectBatches = GenerateTypes.Msg.LoadCollectBatches
+let LoadCollectPreview = GenerateTypes.Msg.LoadCollectPreview
+let RunCollectBatch = GenerateTypes.Msg.RunCollectBatch
 
 /// Creates a proxy for calling server API endpoints.
 let topasApi = Api.makeProxy<ITopasApi> ()
@@ -70,6 +84,7 @@ let init () : Model * Cmd<Msg> =
         SelectedPage = Generate
         Generate = initialGenerateModel ()
         Run = initialRunModel ()
+        Collect = initialCollectModel ()
     }
 
     let command =
@@ -105,12 +120,26 @@ let loadRunPreviewCmd (seedBase: string) : Cmd<Msg> =
 let submitRunBatchCmd (request: SubmitRunRequest) : Cmd<Msg> =
     Cmd.OfAsync.perform topasApi.submitRun request (Finished >> SubmitRunBatch)
 
+/// Requests collect batch list from the server API.
+let loadCollectBatchesCmd () : Cmd<Msg> =
+    Cmd.OfAsync.perform topasApi.getCollectBatches () (Finished >> LoadCollectBatches)
+
+/// Requests collect preview from the server API.
+let loadCollectPreviewCmd (request: CollectPreviewRequest) : Cmd<Msg> =
+    Cmd.OfAsync.perform topasApi.previewCollect request (Finished >> LoadCollectPreview)
+
+/// Requests collect execution from the server API.
+let runCollectBatchCmd (request: CollectRequest) : Cmd<Msg> =
+    Cmd.OfAsync.perform topasApi.collectBatch request (Finished >> RunCollectBatch)
+
 /// Updates model state based on incoming messages.
 let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     match msg with
     | SelectPage page ->
         if page = Run then
             { model with SelectedPage = page }, Cmd.ofMsg (LoadRunBatches(Start()))
+        elif page = Collect then
+            { model with SelectedPage = page }, Cmd.ofMsg (LoadCollectBatches(Start()))
         else
             { model with SelectedPage = page }, Cmd.none
     | LoadAppConfig call ->
@@ -532,6 +561,207 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                         Run = {
                             model.Run with
                                 Step = RunResult
+                                Error = Some errorMessage
+                        }
+                },
+                Cmd.none
+    | StartCollectWizard ->
+        {
+            model with
+                Collect = {
+                    model.Collect with
+                        Step = CollectSelectBatch
+                        Error = None
+                }
+        },
+        Cmd.ofMsg (LoadCollectBatches(Start()))
+    | CancelCollectWizard ->
+        { model with Collect = initialCollectModel () }, Cmd.none
+    | PreviousCollectStep ->
+        let previousStep =
+            match model.Collect.Step with
+            | CollectWelcome -> CollectWelcome
+            | CollectSelectBatch -> CollectWelcome
+            | CollectPreflightReview -> CollectSelectBatch
+            | CollectMergeReview -> CollectPreflightReview
+            | CollectResult -> CollectMergeReview
+
+        {
+            model with
+                Collect = {
+                    model.Collect with
+                        Step = previousStep
+                        Error = None
+                }
+        },
+        Cmd.none
+    | NextCollectStep ->
+        match model.Collect.Step with
+        | CollectWelcome ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            Step = CollectSelectBatch
+                            Error = None
+                    }
+            },
+            Cmd.ofMsg (LoadCollectBatches(Start()))
+        | CollectSelectBatch ->
+            match model.Collect.SelectedSeedBase with
+            | Some seedBase when canProceedCollectBatchSelection model.Collect ->
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                Step = CollectPreflightReview
+                                Preview = model.Collect.Preview.StartLoading()
+                                Error = None
+                        }
+                },
+                loadCollectPreviewCmd { SeedBase = seedBase }
+            | _ ->
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                Error = Some "Select a batch before continuing."
+                        }
+                },
+                Cmd.none
+        | CollectPreflightReview ->
+            if canProceedCollectPreflight model.Collect then
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                Step = CollectMergeReview
+                                Error = None
+                        }
+                },
+                Cmd.none
+            else
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                Error = Some "Preflight failed. Collect is blocked."
+                        }
+                },
+                Cmd.none
+        | CollectMergeReview ->
+            match model.Collect.SelectedSeedBase, model.Collect.Preview with
+            | Some seedBase, Loaded preview when preview.Preflight.CanCollect ->
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                CollectResult = model.Collect.CollectResult.StartLoading()
+                                Error = None
+                        }
+                },
+                runCollectBatchCmd { SeedBase = seedBase }
+            | _ ->
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                Error = Some "Cannot collect. Review preflight and selection."
+                        }
+                },
+                Cmd.none
+        | CollectResult ->
+            { model with Collect = initialCollectModel () }, Cmd.ofMsg (LoadCollectBatches(Start()))
+    | SelectCollectBatch seedBase ->
+        {
+            model with
+                Collect = {
+                    model.Collect with
+                        SelectedSeedBase = Some seedBase
+                        Error = None
+                }
+        },
+        Cmd.none
+    | LoadCollectBatches call ->
+        match call with
+        | Start() ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            Batches = model.Collect.Batches.StartLoading()
+                            Error = None
+                    }
+            },
+            loadCollectBatchesCmd ()
+        | Finished resultValue ->
+            let remoteData, error = setRemoteResult resultValue model.Collect.Batches
+
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            Batches = remoteData
+                            Error = error
+                    }
+            },
+            Cmd.none
+    | LoadCollectPreview call ->
+        match call with
+        | Start request ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            SelectedSeedBase = Some request.SeedBase
+                            Preview = model.Collect.Preview.StartLoading()
+                            Error = None
+                    }
+            },
+            loadCollectPreviewCmd request
+        | Finished resultValue ->
+            let remoteData, error = setRemoteResult resultValue model.Collect.Preview
+
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            Preview = remoteData
+                            Error = error
+                    }
+            },
+            Cmd.none
+    | RunCollectBatch call ->
+        match call with
+        | Start request ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            CollectResult = model.Collect.CollectResult.StartLoading()
+                            Error = None
+                    }
+            },
+            runCollectBatchCmd request
+        | Finished resultValue ->
+            match resultValue with
+            | Ok collected ->
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                Step = CollectResult
+                                CollectResult = Loaded collected
+                                Error = None
+                        }
+                },
+                Cmd.ofMsg (LoadCollectBatches(Start()))
+            | Error errorMessage ->
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                Step = CollectResult
                                 Error = Some errorMessage
                         }
                 },

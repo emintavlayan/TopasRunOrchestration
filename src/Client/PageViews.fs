@@ -5,6 +5,7 @@ open GenerateLogic
 open GenerateTypes
 open GenerateViews
 open RunViews
+open CollectViews
 
 /// Returns classes for underline-style tabs in selected/unselected state.
 let tabButtonClass (isSelected: bool) =
@@ -23,15 +24,12 @@ let tabButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
         prop.onClick (fun _ -> dispatch (SelectPage page))
     ]
 
-/// Renders the Collect page placeholder.
-let viewCollectPage () = Html.p "Collect: Not implemented."
-
 /// Renders page content based on selected top-level tab.
 let viewPageContent (model: Model) (dispatch: Msg -> unit) =
     match model.SelectedPage with
     | Generate -> viewGeneratePage model.Generate dispatch
     | Run -> viewRunPage model.Run dispatch
-    | Collect -> viewCollectPage ()
+    | Collect -> viewCollectPage model.Collect dispatch
 
 /// Renders the client landing page and selected content.
 let view (model: Model) (dispatch: Msg -> unit) =

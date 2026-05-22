@@ -26,6 +26,14 @@ type RunStep =
     | SlurmScriptReview
     | RunResult
 
+/// Represents the steps in the collect wizard flow.
+type CollectStep =
+    | CollectWelcome
+    | CollectSelectBatch
+    | CollectPreflightReview
+    | CollectMergeReview
+    | CollectResult
+
 /// Represents the state of the generate wizard.
 type GenerateModel = {
     Step: GenerateStep
@@ -49,11 +57,22 @@ type RunModel = {
     Error: string option
 }
 
+/// Represents the state of the collect wizard.
+type CollectModel = {
+    Step: CollectStep
+    Batches: RemoteData<CollectBatchSummary list>
+    SelectedSeedBase: string option
+    Preview: RemoteData<CollectPreviewResult>
+    CollectResult: RemoteData<CollectResult>
+    Error: string option
+}
+
 /// Represents the root client model.
 type Model = {
     SelectedPage: Page
     Generate: GenerateModel
     Run: RunModel
+    Collect: CollectModel
 }
 
 /// Represents messages that can update the client model.
@@ -82,3 +101,11 @@ type Msg =
     | LoadRunBatches of ApiCall<unit, Result<RunBatchSummary list, string>>
     | LoadRunPreview of ApiCall<string, Result<RunScriptPreview, string>>
     | SubmitRunBatch of ApiCall<SubmitRunRequest, Result<SubmitRunResult, string>>
+    | StartCollectWizard
+    | CancelCollectWizard
+    | PreviousCollectStep
+    | NextCollectStep
+    | SelectCollectBatch of string
+    | LoadCollectBatches of ApiCall<unit, Result<CollectBatchSummary list, string>>
+    | LoadCollectPreview of ApiCall<CollectPreviewRequest, Result<CollectPreviewResult, string>>
+    | RunCollectBatch of ApiCall<CollectRequest, Result<CollectResult, string>>
