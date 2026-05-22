@@ -6,6 +6,8 @@ open Microsoft.Data.Sqlite
 open Shared
 open TsebtConfig
 open Bootstrap
+open CollectPlanning
+open CollectPreflight
 
 /// Returns nullable database values as optional strings.
 let private asOptionalString (value: obj) : string option =
@@ -137,9 +139,82 @@ let getCollectBatchDetails (settings: TsebtSettings) (seedBase: string) : Result
     with ex ->
         Error $"Failed loading collect batch details: {ex.Message}"
 
-/// Returns not-implemented response for collect preview during foundation phase.
-let previewCollect (_settings: TsebtSettings) (_request: CollectPreviewRequest) : Result<CollectPreviewResult, string> =
-    Error "Collect preview is not implemented yet."
+/// Reads generated run rows needed for collect preflight and planning.
+let private readCollectRunRows
+    (connection: SqliteConnection)
+    (seedBase: string)
+    : Result<CollectRunRow list, string> =
+    try
+        use command = connection.CreateCommand()
+
+        command.CommandText <-
+            """SELECT
+  r.run_id,
+  r.phase_space_index,
+  r.node_digit,
+  r.output_file_path
+FROM generated_runs r
+INNER JOIN generated_batches b ON b.id = r.batch_id
+WHERE b.seed_base = $seedBase
+ORDER BY r.id;"""
+
+        command.Parameters.AddWithValue("$seedBase", seedBase) |> ignore
+        use reader = command.ExecuteReader()
+        let rows = ResizeArray<CollectRunRow>()
+
+        while reader.Read() do
+            rows.Add(
+                {
+                    RunId = reader.GetString(0)
+                    PhaseSpaceIndex = reader.GetString(1)
+                    NodeDigit = reader.GetString(2)
+                    OutputFilePath = reader.GetString(3)
+                }
+            )
+
+        Ok(List.ofSeq rows)
+    with ex ->
+        Error $"Failed reading collect run rows: {ex.Message}"
+
+/// Runs collect preflight checks for one seed base using generated run metadata.
+let preflightCollect (settings: TsebtSettings) (seedBase: string) : Result<CollectPreflightResult, string> =
+    try
+        use connection = new SqliteConnection(toConnectionString settings)
+        connection.Open()
+
+        result {
+            let! rows = readCollectRunRows connection seedBase
+            return buildCollectPreflightResult settings seedBase rows
+        }
+    with ex ->
+        Error $"Failed running collect preflight: {ex.Message}"
+
+/// Builds collect preview including planned output paths and preflight details.
+let previewCollect (settings: TsebtSettings) (request: CollectPreviewRequest) : Result<CollectPreviewResult, string> =
+    try
+        use connection = new SqliteConnection(toConnectionString settings)
+        connection.Open()
+
+        result {
+            let! rows = readCollectRunRows connection request.SeedBase
+            let preflight = buildCollectPreflightResult settings request.SeedBase rows
+            let outputFolder = outputFolderPath settings request.SeedBase
+
+            return
+                {
+                    SeedBase = request.SeedBase
+                    ExpectedRunCount = preflight.ExpectedRunCount
+                    PhaseSpaceCount = rows |> List.map _.PhaseSpaceIndex |> List.distinct |> List.length
+                    NodeCount = rows |> List.map _.NodeDigit |> List.distinct |> List.length
+                    OutputFolder = outputFolder
+                    PlannedMergedFiles = plannedMergedFiles settings request.SeedBase rows
+                    FinalSummaryPath = plannedSummaryPath settings request.SeedBase
+                    ManifestPath = plannedManifestPath settings request.SeedBase
+                    Preflight = preflight
+                }
+        }
+    with ex ->
+        Error $"Failed building collect preview: {ex.Message}"
 
 /// Returns not-implemented response for collect operation during foundation phase.
 let collectBatch (_settings: TsebtSettings) (_request: CollectRequest) : Result<CollectResult, string> =
