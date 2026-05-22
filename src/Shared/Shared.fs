@@ -119,10 +119,12 @@ type SubmitRunRequest = { SeedBase: string }
 type SubmitRunResult = {
     SeedBase: string
     RunStatus: string
-    SlurmJobId: string option
-    ManifestPath: string option
-    ScriptPath: string option
-    SubmittedAt: string option
+    SlurmJobId: string
+    SubmittedRunCount: int
+    ManifestPath: string
+    ScriptPath: string
+    SbatchOutput: string
+    SubmittedAt: string
 }
 
 type AppConfigView = {

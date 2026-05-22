@@ -1,7 +1,9 @@
 module RunOperation
 
 open System
+open System.Diagnostics
 open System.IO
+open System.Text.RegularExpressions
 open FsToolkit.ErrorHandling
 open Microsoft.Data.Sqlite
 open Shared
@@ -242,8 +244,31 @@ let preflightRun (settings: TsebtSettings) (seedBase: string) : Result<RunPrefli
         return evaluatePreflight settings details
     }
 
+/// Builds one manifest preview row from one generated run row.
+let toManifestPreviewRow (settings: TsebtSettings) (seedBase: string) (taskId: int) (row: RunManifestRow) : RunManifestPreviewRow =
+    {
+        TaskId = taskId
+        NodeName = $"node{row.NodeDigit.PadLeft(2, '0')}"
+        RunId = row.RunId
+        InputFilePath = row.InputFilePath
+        LogFilePath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, $"{row.RunId}.log")
+    }
+
+/// Formats one manifest preview row as a TSV line.
+let formatManifestRow (row: RunManifestPreviewRow) : string =
+    $"{row.TaskId}\t{row.NodeName}\t{row.RunId}\t{row.InputFilePath}\t{row.LogFilePath}"
+
+/// Parses Slurm job id from sbatch output.
+let parseSlurmJobId (sbatchOutput: string) : Result<string, string> =
+    let matchResult = Regex.Match(sbatchOutput, @"Submitted\s+batch\s+job\s+(\d+)", RegexOptions.IgnoreCase)
+
+    if matchResult.Success then
+        Ok matchResult.Groups[1].Value
+    else
+        Error $"Failed parsing Slurm job id from sbatch output: {sbatchOutput}"
+
 /// Builds Slurm script text for a run batch manifest.
-let private buildSlurmScriptText
+let buildSlurmScriptText
     (settings: TsebtSettings)
     (seedBase: string)
     (manifestPath: string)
@@ -272,6 +297,47 @@ let private buildSlurmScriptText
     ]
     |> String.concat "\n"
 
+/// Executes sbatch for the given script path and returns combined process output.
+let private runSbatchProcess (scriptPath: string) : Result<string, string> =
+    try
+        let startInfo = ProcessStartInfo()
+        startInfo.FileName <- "sbatch"
+        startInfo.Arguments <- scriptPath
+        startInfo.RedirectStandardOutput <- true
+        startInfo.RedirectStandardError <- true
+        startInfo.UseShellExecute <- false
+        startInfo.CreateNoWindow <- true
+
+        use proc = new Process()
+        proc.StartInfo <- startInfo
+        proc.Start() |> ignore
+        let stdout = proc.StandardOutput.ReadToEnd()
+        let stderr = proc.StandardError.ReadToEnd()
+        proc.WaitForExit()
+        let combined = $"{stdout}\n{stderr}".Trim()
+
+        if proc.ExitCode = 0 then
+            Ok combined
+        else
+            Error $"sbatch failed with exit code {proc.ExitCode}. Output: {combined}"
+    with ex ->
+        Error $"Failed executing sbatch: {ex.Message}"
+
+/// Writes manifest and script files for one run batch.
+let private writeRunBatchFiles (manifestPath: string) (manifestText: string) (scriptPath: string) (scriptText: string) : Result<unit, string> =
+    try
+        let runFolder = Path.GetDirectoryName(manifestPath)
+
+        if String.IsNullOrWhiteSpace runFolder then
+            Error $"Invalid run folder for manifest path: {manifestPath}"
+        else
+            Directory.CreateDirectory(runFolder) |> ignore
+            File.WriteAllText(manifestPath, manifestText)
+            File.WriteAllText(scriptPath, scriptText)
+            Ok()
+    with ex ->
+        Error $"Failed writing run manifest/script files: {ex.Message}"
+
 /// Builds a run script preview payload from existing generated run metadata.
 let previewRun (settings: TsebtSettings) (seedBase: string) : Result<RunScriptPreview, string> =
     result {
@@ -280,16 +346,7 @@ let previewRun (settings: TsebtSettings) (seedBase: string) : Result<RunScriptPr
         let manifestPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "run_manifest.tsv")
         let scriptPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "run_batch.slurm")
 
-        let manifestRows =
-            details.Rows
-            |> List.mapi (fun index row ->
-                {
-                    TaskId = index + 1
-                    NodeName = $"node{row.NodeDigit.PadLeft(2, '0')}"
-                    RunId = row.RunId
-                    InputFilePath = row.InputFilePath
-                    LogFilePath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, $"{row.RunId}.log")
-                })
+        let manifestRows = details.Rows |> List.mapi (fun index row -> toManifestPreviewRow settings seedBase (index + 1) row)
 
         let manifestRowsPreview = manifestRows |> List.truncate 20
         let scriptText = buildSlurmScriptText settings seedBase manifestPath manifestRows.Length
@@ -306,19 +363,22 @@ let previewRun (settings: TsebtSettings) (seedBase: string) : Result<RunScriptPr
             }
     }
 
-/// Updates generated batch status metadata for foundation-only submit behavior.
+/// Updates generated batch submission metadata after successful sbatch.
 let private updateRunSubmissionStatus
     (connection: SqliteConnection)
     (seedBase: string)
-    (newStatus: string)
+    (slurmJobId: string)
     (manifestPath: string)
     (scriptPath: string)
+    (sbatchOutput: string)
+    (submittedRunCount: int)
     : Result<SubmitRunResult, string> =
     try
         let submittedAt = DateTime.UtcNow.ToString("O")
         use command = connection.CreateCommand()
-        command.CommandText <- "UPDATE generated_batches SET run_status = $runStatus, submitted_at = $submittedAt, manifest_path = $manifestPath, script_path = $scriptPath WHERE seed_base = $seedBase;"
-        command.Parameters.AddWithValue("$runStatus", newStatus) |> ignore
+        command.CommandText <- "UPDATE generated_batches SET run_status = $runStatus, slurm_job_id = $slurmJobId, submitted_at = $submittedAt, manifest_path = $manifestPath, script_path = $scriptPath WHERE seed_base = $seedBase;"
+        command.Parameters.AddWithValue("$runStatus", "Submitted") |> ignore
+        command.Parameters.AddWithValue("$slurmJobId", slurmJobId) |> ignore
         command.Parameters.AddWithValue("$submittedAt", submittedAt) |> ignore
         command.Parameters.AddWithValue("$manifestPath", manifestPath) |> ignore
         command.Parameters.AddWithValue("$scriptPath", scriptPath) |> ignore
@@ -329,37 +389,59 @@ let private updateRunSubmissionStatus
         if affected = 0 then
             Error $"Run batch not found for seed base: {seedBase}"
         else
+            use runsCommand = connection.CreateCommand()
+            runsCommand.CommandText <- "UPDATE generated_runs SET status = $status WHERE batch_id = (SELECT id FROM generated_batches WHERE seed_base = $seedBase LIMIT 1);"
+            runsCommand.Parameters.AddWithValue("$status", "Submitted") |> ignore
+            runsCommand.Parameters.AddWithValue("$seedBase", seedBase) |> ignore
+            runsCommand.ExecuteNonQuery() |> ignore
+
             Ok
                 {
                     SeedBase = seedBase
-                    RunStatus = newStatus
-                    SlurmJobId = None
-                    ManifestPath = Some manifestPath
-                    ScriptPath = Some scriptPath
-                    SubmittedAt = Some submittedAt
+                    RunStatus = "Submitted"
+                    SlurmJobId = slurmJobId
+                    SubmittedRunCount = submittedRunCount
+                    ManifestPath = manifestPath
+                    ScriptPath = scriptPath
+                    SbatchOutput = sbatchOutput
+                    SubmittedAt = submittedAt
                 }
     with ex ->
         Error $"Failed updating run submission status: {ex.Message}"
 
-/// Stores submit foundation metadata without performing Slurm submission.
+/// Returns true when run status is a non-rerunnable submitted state.
+let private isAlreadySubmittedStatus (status: string) : bool =
+    [ "Submitted"; "Running"; "Completed"; "Failed" ]
+    |> List.exists (fun value -> String.Equals(value, status, StringComparison.OrdinalIgnoreCase))
+
+/// Submits one generated run batch to Slurm after successful preflight.
 let submitRun (settings: TsebtSettings) (request: SubmitRunRequest) : Result<SubmitRunResult, string> =
     result {
+        let! details = getRunBatchDetails settings request.SeedBase
+
+        if isAlreadySubmittedStatus details.RunStatus && details.SlurmJobId.IsSome then
+            return!
+                Error $"Batch {request.SeedBase} has already been submitted to Slurm as job {details.SlurmJobId.Value}."
+
         let! preview = previewRun settings request.SeedBase
 
         if not preview.Preflight.CanSubmit then
             return! Error $"Run preflight failed for seed base: {request.SeedBase}"
 
+        let manifestRows = details.Rows |> List.mapi (fun index row -> toManifestPreviewRow settings request.SeedBase (index + 1) row)
+
+        let manifestHeader = "task_id\tnode_name\trun_id\tinput_file_path\tlog_file_path"
+        let manifestLines = manifestRows |> List.map formatManifestRow
+        let manifestText = String.concat "\n" (manifestHeader :: manifestLines)
+
+        do! writeRunBatchFiles preview.ManifestPath manifestText preview.ScriptPath preview.ScriptText
+        let! sbatchOutput = runSbatchProcess preview.ScriptPath
+        let! slurmJobId = parseSlurmJobId sbatchOutput
+
         try
             use connection = new SqliteConnection(toConnectionString settings)
             connection.Open()
-
-            return!
-                updateRunSubmissionStatus
-                    connection
-                    request.SeedBase
-                    "Submitted"
-                    preview.ManifestPath
-                    preview.ScriptPath
+            return! updateRunSubmissionStatus connection request.SeedBase slurmJobId preview.ManifestPath preview.ScriptPath sbatchOutput manifestRows.Length
         with ex ->
             return! Error $"Failed submitting run batch: {ex.Message}"
     }

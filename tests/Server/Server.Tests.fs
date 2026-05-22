@@ -6,6 +6,7 @@ open Shared
 open Server
 open GenerateOperation
 open GeneratePlanning
+open RunOperation
 open TsebtConfig
 open SqliteInit
 open System
@@ -306,6 +307,60 @@ let server =
                     Expect.equal afterFileCount beforeFileCount "Preflight should not write any new files"
 
             Directory.Delete(appRoot, true)
+
+        testCase "Parse Slurm job id from sbatch success output"
+        <| fun _ ->
+            let parsed = parseSlurmJobId "Submitted batch job 12345"
+            Expect.equal parsed (Ok "12345") "Should parse numeric job id from sbatch output"
+
+        testCase "Parse Slurm job id fails for invalid output"
+        <| fun _ ->
+            let parsed = parseSlurmJobId "sbatch: something unexpected"
+            Expect.isError parsed "Should fail when sbatch output does not contain job id pattern"
+
+        testCase "Manifest row formatting produces expected TSV columns"
+        <| fun _ ->
+            let row = {
+                TaskId = 1
+                NodeName = "node01"
+                RunId = "seed10011_phsp01"
+                InputFilePath = "/app/inputs/1001/seed10011_phsp01.txt"
+                LogFilePath = "/app/runs/1001/seed10011_phsp01.log"
+            }
+
+            let line = formatManifestRow row
+            Expect.equal line "1\tnode01\tseed10011_phsp01\t/app/inputs/1001/seed10011_phsp01.txt\t/app/runs/1001/seed10011_phsp01.log" "Manifest row should use tab-separated layout"
+
+        testCase "Slurm script includes topas command and log redirection"
+        <| fun _ ->
+            let settings = {
+                AppRoot = "/app"
+                Paths = {
+                    Templates = "templates"
+                    Inputs = "inputs"
+                    Runs = "runs"
+                    Database = "database/app.db"
+                    Logs = "logs"
+                }
+                Placeholders = {
+                    PhaseSpaceFile = "__PHSP_FILE__"
+                    OutputFile = "__OUTPUT_FILE__"
+                    Seed = "__SEED__"
+                }
+                Seed = { CurrentBase = "1001" }
+                Topas = { Executable = "topas" }
+                Slurm = {
+                    Partition = "compute"
+                    CpusPerTask = 1
+                }
+                Nodes = [ { Name = "node01"; Digit = "1" } ]
+                PhaseSpaceFiles = [ { Index = "01"; Value = "ps01.IAEAphsp" } ]
+            }
+
+            let script =
+                buildSlurmScriptText settings "1001" "/app/runs/1001/run_manifest.tsv" 4
+
+            Expect.stringContains script "\"topas\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" "Script should execute TOPAS and redirect log output"
     ]
 
 let all = testList "All" [ Shared.Tests.shared; server ]
