@@ -6,6 +6,17 @@ open GenerateTypes
 open SAFE
 open Shared
 
+/// Returns base classes for text-style action buttons.
+let textButtonClass = "rounded px-3 py-2 text-slate-700 transition hover:bg-slate-100"
+
+/// Returns base classes for outlined secondary action buttons.
+let outlinedButtonClass =
+    "rounded border border-slate-300 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-50"
+
+/// Returns base classes for primary call-to-action buttons.
+let primaryButtonClass =
+    "rounded bg-blue-700 px-4 py-2 text-white transition hover:bg-blue-800 disabled:opacity-40"
+
 /// Groups template files by configured folder group.
 let groupTemplateFiles (files: TemplateFileInfo list) : (string * TemplateFileInfo list) list =
     files
@@ -21,6 +32,8 @@ let checkBoxRow (isChecked: bool) (labelText: string) (onToggle: unit -> unit) =
             Html.input [
                 prop.type'.checkbox
                 prop.isChecked isChecked
+                prop.className "h-4 w-4 rounded border-slate-300 focus:ring-blue-500"
+                prop.style [ style.custom ("accent-color", "#1d4ed8") ]
                 prop.onChange (fun (_: bool) -> onToggle ())
             ]
             Html.span labelText
@@ -90,12 +103,12 @@ let viewNodes (generate: GenerateModel) (dispatch: Msg -> unit) =
                 prop.className "mb-3 flex gap-2"
                 prop.children [
                     Html.button [
-                        prop.className "rounded bg-slate-200 px-3 py-1"
+                        prop.className outlinedButtonClass
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllNodes)
                     ]
                     Html.button [
-                        prop.className "rounded bg-slate-200 px-3 py-1"
+                        prop.className outlinedButtonClass
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoNodes)
                     ]
@@ -118,12 +131,12 @@ let viewPhaseSpaceFiles (generate: GenerateModel) (dispatch: Msg -> unit) =
                 prop.className "mb-3 flex gap-2"
                 prop.children [
                     Html.button [
-                        prop.className "rounded bg-slate-200 px-3 py-1"
+                        prop.className outlinedButtonClass
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllPhaseSpaceFiles)
                     ]
                     Html.button [
-                        prop.className "rounded bg-slate-200 px-3 py-1"
+                        prop.className outlinedButtonClass
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoPhaseSpaceFiles)
                     ]
@@ -259,25 +272,26 @@ let viewGenerateStep (generate: GenerateModel) (dispatch: Msg -> unit) =
 /// Renders wizard navigation controls.
 let viewWizardNavigation (generate: GenerateModel) (dispatch: Msg -> unit) =
     Html.div [
-        prop.className "mt-6 flex items-center justify-between"
+        prop.className "mt-6 flex justify-end"
         prop.children [
-            Html.button [
-                prop.className "rounded px-3 py-2 text-slate-700 hover:bg-slate-100"
-                prop.text "Cancel"
-                prop.onClick (fun _ -> dispatch CancelGenerateWizard)
-            ]
             Html.div [
                 prop.className "flex gap-2"
                 prop.children [
+                    Html.button [
+                        prop.className textButtonClass
+                        prop.text "Cancel"
+                        prop.onClick (fun _ -> dispatch CancelGenerateWizard)
+                    ]
+
                     if showPreviousButton generate.Step then
                         Html.button [
-                            prop.className "rounded bg-slate-200 px-3 py-2"
+                            prop.className outlinedButtonClass
                             prop.text "Previous"
                             prop.onClick (fun _ -> dispatch PreviousGenerateStep)
                         ]
 
                     Html.button [
-                        prop.className "rounded bg-slate-800 px-4 py-2 text-white disabled:opacity-40"
+                        prop.className primaryButtonClass
                         prop.disabled (disablePrimaryButton generate)
                         prop.text (primaryButtonText generate.Step)
                         prop.onClick (fun _ -> onPrimaryClick generate dispatch)
