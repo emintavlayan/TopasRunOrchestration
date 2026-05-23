@@ -434,6 +434,99 @@ let runPlanningTests =
 
             let script = buildSlurmScriptText settings "1001" "/app/runs/1001/run_manifest.tsv" 4
             Expect.stringContains script "\"topas\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" "Script should execute TOPAS and redirect log output"
+            Expect.stringContains script "#SBATCH --job-name=tsebt-1001" "Script should include seed batch job name"
+            Expect.stringContains script "#SBATCH --partition=compute" "Script should include configured partition"
+            Expect.stringContains script "#SBATCH --array=1-4" "Script should include array task range"
+            Expect.stringContains script "SLURM_ARRAY_TASK_ID" "Script should resolve row by task id"
+    ]
+
+let runSubmissionTests =
+    testList "Run submission" [
+        testCase "Run preflight fails when output csv or log collisions exist"
+        <| fun _ ->
+            let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-run-preflight-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(appRoot) |> ignore
+            let settings = buildSettings appRoot
+
+            match Bootstrap.ensureRootFolders settings with
+            | Error errorMessage -> failtestf "Failed creating root folders: %s" errorMessage
+            | Ok() ->
+                match initialize settings with
+                | Error errorMessage -> failtestf "Failed initializing sqlite: %s" errorMessage
+                | Ok _ ->
+                    let dbPath = Path.Combine(appRoot, "database", "app.db")
+                    let csb = SqliteConnectionStringBuilder()
+                    csb.DataSource <- dbPath
+                    use conn = new SqliteConnection(csb.ConnectionString)
+                    conn.Open()
+
+                    use batchInsert = conn.CreateCommand()
+                    batchInsert.CommandText <- "INSERT INTO generated_batches(seed_base, created_at, run_status) VALUES('1001', '2026-01-01T00:00:00Z', 'Generated');"
+                    batchInsert.ExecuteNonQuery() |> ignore
+
+                    let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+                    let runFolder = Path.Combine(appRoot, "runs", "1001")
+                    Directory.CreateDirectory(inputFolder) |> ignore
+                    Directory.CreateDirectory(runFolder) |> ignore
+
+                    let inputPath = Path.Combine(inputFolder, "seed10011_phsp01.txt")
+                    let outputBase = Path.Combine(runFolder, "seed10011_phsp01")
+                    File.WriteAllText(inputPath, "input")
+                    File.WriteAllText(outputBase + ".csv", "csv")
+                    File.WriteAllText(outputBase + ".log", "log")
+
+                    use runInsert = conn.CreateCommand()
+                    runInsert.CommandText <- "INSERT INTO generated_runs(batch_id, run_id, phase_space_index, phase_space_file, node_name, node_digit, seed, input_file_path, output_file_path, run_folder, status, created_at) VALUES((SELECT id FROM generated_batches WHERE seed_base='1001'), 'seed10011_phsp01', '01', 'ps01.IAEAphsp', 'node01', '1', '10011', $inputPath, $outputBase, $runFolder, 'Generated', '2026-01-01T00:00:00Z');"
+                    runInsert.Parameters.AddWithValue("$inputPath", inputPath) |> ignore
+                    runInsert.Parameters.AddWithValue("$outputBase", outputBase) |> ignore
+                    runInsert.Parameters.AddWithValue("$runFolder", runFolder) |> ignore
+                    runInsert.ExecuteNonQuery() |> ignore
+
+                    let preflight = preflightRun settings "1001"
+                    Expect.isOk preflight "Preflight should return checks"
+
+                    match preflight with
+                    | Error _ -> ()
+                    | Ok result ->
+                        Expect.isFalse result.CanSubmit "CSV/log collisions should block submission"
+                        let csvCheck = result.Checks |> List.find (fun c -> c.Name = "No output CSV collisions")
+                        let logCheck = result.Checks |> List.find (fun c -> c.Name = "No log collisions")
+                        Expect.isFalse csvCheck.Ok "Existing .csv should fail csv collision check"
+                        Expect.isFalse logCheck.Ok "Existing .log should fail log collision check"
+
+            Directory.Delete(appRoot, true)
+
+        testCase "Submit run blocks already submitted batch before sbatch"
+        <| fun _ ->
+            let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-run-submitted-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(appRoot) |> ignore
+            let settings = buildSettings appRoot
+
+            match Bootstrap.ensureRootFolders settings with
+            | Error errorMessage -> failtestf "Failed creating root folders: %s" errorMessage
+            | Ok() ->
+                match initialize settings with
+                | Error errorMessage -> failtestf "Failed initializing sqlite: %s" errorMessage
+                | Ok _ ->
+                    let dbPath = Path.Combine(appRoot, "database", "app.db")
+                    let csb = SqliteConnectionStringBuilder()
+                    csb.DataSource <- dbPath
+                    use conn = new SqliteConnection(csb.ConnectionString)
+                    conn.Open()
+
+                    use insert = conn.CreateCommand()
+                    insert.CommandText <- "INSERT INTO generated_batches(seed_base, created_at, run_status, slurm_job_id) VALUES('1001', '2026-01-01T00:00:00Z', 'Submitted', '12345');"
+                    insert.ExecuteNonQuery() |> ignore
+
+                    let result = submitRun settings { SeedBase = "1001" }
+                    Expect.isError result "Already submitted batches should be blocked"
+
+                    match result with
+                    | Ok _ -> ()
+                    | Error message ->
+                        Expect.stringContains message "already been submitted to Slurm as job 12345" "Error should mention existing Slurm job id"
+
+            Directory.Delete(appRoot, true)
     ]
 
 let collectCsvTests =
@@ -530,6 +623,7 @@ let server =
         generateCollisionTests
         generateFilesystemTests
         runPlanningTests
+        runSubmissionTests
         collectCsvTests
     ]
 
