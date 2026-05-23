@@ -136,6 +136,21 @@ Test:
 dotnet test Application.sln
 ```
 
+## Testing coverage
+
+Automated tests currently cover:
+
+- configuration validation and bootstrap folder creation
+- generate planning, placeholder replacement, filesystem generation, and collision protection
+- run manifest/script/job-id parsing logic and preflight/double-submit guards (without real Slurm)
+- collect preflight, CSV merge/statistics, and full collect operation with fake CSV/log data
+
+Manual verification is still required for:
+
+- real `sbatch` submission and cluster behavior
+- real TOPAS execution
+- clinical review of real TOPAS CSV outputs and dose interpretation
+
 ## Documentation
 
 See:
