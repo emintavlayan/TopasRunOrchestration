@@ -14,6 +14,7 @@ open SqliteInit
 open System
 open System.IO
 open Microsoft.Extensions.Configuration
+open Microsoft.Data.Sqlite
 
 /// Builds a minimal valid in-memory configuration for TSEBT settings tests.
 let private buildValidConfig () =
@@ -274,6 +275,122 @@ let generateCollisionTests =
             Directory.Delete(appRoot, true)
     ]
 
+let generateFilesystemTests =
+    testList "Generate filesystem" [
+        testCase "Generate writes expected files and metadata for one batch"
+        <| fun _ ->
+            let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-generate-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(appRoot) |> ignore
+
+            let settings = buildSettings appRoot
+            let templatesFolder = Path.Combine(appRoot, settings.Paths.Templates)
+            Directory.CreateDirectory(templatesFolder) |> ignore
+
+            let templateA = Path.Combine(templatesFolder, "a.txt")
+            let templateB = Path.Combine(templatesFolder, "b.txt")
+            File.WriteAllText(templateA, "seed=__SEED__")
+            File.WriteAllText(templateB, "phsp=__PHSP_FILE__; out=__OUTPUT_FILE__")
+
+            match Bootstrap.ensureRootFolders settings with
+            | Error errorMessage -> failtestf "Failed creating root folders: %s" errorMessage
+            | Ok() ->
+                match initialize settings with
+                | Error errorMessage -> failtestf "Failed initializing sqlite: %s" errorMessage
+                | Ok _ ->
+                    let request = {
+                        SelectedTemplatePaths = [ "a.txt"; "b.txt" ]
+                        SelectedNodeDigits = [ "1"; "2" ]
+                        SelectedPhaseSpaceIndexes = [ "01"; "02" ]
+                    }
+
+                    let result = generate settings "1001" request
+                    Expect.isOk result "Generate should succeed for valid request"
+
+                    match result with
+                    | Error _ -> ()
+                    | Ok generated ->
+                        Expect.equal generated.GeneratedInputCount 4 "Generate should produce 4 input files"
+
+                        let expectedFiles = [
+                            "seed10011_phsp01.txt"
+                            "seed10012_phsp01.txt"
+                            "seed10011_phsp02.txt"
+                            "seed10012_phsp02.txt"
+                        ]
+
+                        let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+                        Expect.isTrue (Directory.Exists inputFolder) "Input folder should exist"
+
+                        expectedFiles
+                        |> List.iter (fun fileName ->
+                            let fullPath = Path.Combine(inputFolder, fileName)
+                            Expect.isTrue (File.Exists fullPath) $"Generated file '{fileName}' should exist"
+                            let content = File.ReadAllText(fullPath)
+                            Expect.stringContains content "seed=1001" "Content should include replaced seed"
+                            Expect.stringContains content "phsp=ps0" "Content should include replaced phase-space file"
+                            Expect.stringContains content "out=" "Content should include replaced output path")
+
+                        let runsFolder = Path.Combine(appRoot, "runs", "1001")
+                        Expect.isTrue (Directory.Exists runsFolder) "Runs folder should exist"
+
+                        let databasePath = Path.Combine(appRoot, "database", "app.db")
+                        let csb = SqliteConnectionStringBuilder()
+                        csb.DataSource <- databasePath
+                        use connection = new SqliteConnection(csb.ConnectionString)
+                        connection.Open()
+
+                        use batchCommand = connection.CreateCommand()
+                        batchCommand.CommandText <- "SELECT COUNT(*) FROM generated_batches WHERE seed_base = $seedBase;"
+                        batchCommand.Parameters.AddWithValue("$seedBase", "1001") |> ignore
+                        let batchCount = Convert.ToInt32(batchCommand.ExecuteScalar())
+                        Expect.equal batchCount 1 "generated_batches should contain one row for seed base 1001"
+
+                        use runCommand = connection.CreateCommand()
+                        runCommand.CommandText <- "SELECT COUNT(*) FROM generated_runs WHERE batch_id IN (SELECT id FROM generated_batches WHERE seed_base = $seedBase);"
+                        runCommand.Parameters.AddWithValue("$seedBase", "1001") |> ignore
+                        let runCount = Convert.ToInt32(runCommand.ExecuteScalar())
+                        Expect.equal runCount 4 "generated_runs should contain four rows for seed base 1001"
+
+            Directory.Delete(appRoot, true)
+
+        testCase "Generate rejects second run for same seed and preserves original files"
+        <| fun _ ->
+            let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-generate-collision-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(appRoot) |> ignore
+            let settings = buildSettings appRoot
+
+            let templatesFolder = Path.Combine(appRoot, settings.Paths.Templates)
+            Directory.CreateDirectory(templatesFolder) |> ignore
+            let templatePath = Path.Combine(templatesFolder, "base.txt")
+            File.WriteAllText(templatePath, "seed=__SEED__; phsp=__PHSP_FILE__; out=__OUTPUT_FILE__")
+
+            match Bootstrap.ensureRootFolders settings with
+            | Error errorMessage -> failtestf "Failed creating root folders: %s" errorMessage
+            | Ok() ->
+                match initialize settings with
+                | Error errorMessage -> failtestf "Failed initializing sqlite: %s" errorMessage
+                | Ok _ ->
+                    let request = {
+                        SelectedTemplatePaths = [ "base.txt" ]
+                        SelectedNodeDigits = [ "1" ]
+                        SelectedPhaseSpaceIndexes = [ "01" ]
+                    }
+
+                    let first = generate settings "1001" request
+                    Expect.isOk first "First generate call should succeed"
+
+                    let generatedFile = Path.Combine(appRoot, "inputs", "1001", "seed10011_phsp01.txt")
+                    let before = File.ReadAllText generatedFile
+
+                    let second = generate settings "1001" request
+                    Expect.isError second "Second generate call should fail because of collision protection"
+
+                    let after = File.ReadAllText generatedFile
+                    Expect.equal after before "Collision failure should not overwrite existing generated file"
+
+            Directory.Delete(appRoot, true)
+    ]
+
 let runPlanningTests =
     testList "Run planning" [
         testCase "Parse Slurm job id from sbatch success output"
@@ -411,6 +528,7 @@ let server =
         bootstrapTests
         generatePlanningTests
         generateCollisionTests
+        generateFilesystemTests
         runPlanningTests
         collectCsvTests
     ]
