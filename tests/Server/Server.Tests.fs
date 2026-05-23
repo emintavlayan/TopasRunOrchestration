@@ -42,8 +42,54 @@ let private buildValidConfig () =
 
     ConfigurationBuilder().AddInMemoryCollection(values).Build() :> IConfiguration
 
+/// Builds a valid settings record used by planning and bootstrap tests.
+let private buildSettings (appRoot: string) =
+    {
+        AppRoot = appRoot
+        Paths = {
+            Templates = "templates"
+            Inputs = "inputs"
+            Runs = "runs"
+            Outputs = "outputs"
+            Database = "database\\app.db"
+            Logs = "logs"
+        }
+        Placeholders = {
+            PhaseSpaceFile = "__PHSP_FILE__"
+            OutputFile = "__OUTPUT_FILE__"
+            Seed = "__SEED__"
+        }
+        Seed = { CurrentBase = "1001" }
+        Topas = { Executable = "topas" }
+        Slurm = {
+            Partition = "compute"
+            CpusPerTask = 1
+        }
+        Nodes = [
+            { Name = "node01"; Digit = "1" }
+            { Name = "node02"; Digit = "2" }
+        ]
+        PhaseSpaceFiles = [
+            { Index = "01"; Value = "ps01.IAEAphsp" }
+            { Index = "02"; Value = "ps02.IAEAphsp" }
+        ]
+    }
+
 let configTests =
     testList "Config" [
+        testCase "TSEBT load succeeds for valid minimal config"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            let loaded = TsebtConfig.load cfg
+            Expect.isOk loaded "Load should succeed for a valid minimal configuration"
+
+        testCase "TSEBT load fails when AppRoot is missing"
+        <| fun _ ->
+            let cfg = buildValidConfig ()
+            cfg.["Tsebt:AppRoot"] <- null
+            let loaded = TsebtConfig.load cfg
+            Expect.isError loaded "Load should fail when AppRoot is missing"
+
         testCase "TSEBT load fails when nodes list is empty"
         <| fun _ ->
             let cfg = buildValidConfig ()
@@ -91,158 +137,33 @@ let configTests =
             cfg.["Tsebt:Placeholders:Seed"] <- ""
             let loaded = TsebtConfig.load cfg
             Expect.isError loaded "Load should fail when placeholders are empty"
+    ]
 
-        testCase "Seed construction appends node digit"
+let bootstrapTests =
+    testList "Bootstrap" [
+        testCase "Bootstrap creates required folders and does not create phsp-files"
         <| fun _ ->
-            Expect.equal (buildSeed "1001" "1") "10011" "Seed should append node digit 1"
-            Expect.equal (buildSeed "1001" "7") "10017" "Seed should append node digit 7"
+            let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-bootstrap-{Guid.NewGuid():N}")
+            Directory.CreateDirectory(appRoot) |> ignore
 
-        testCase "RunId construction uses phase-space index and seed"
-        <| fun _ -> Expect.equal (buildRunId "01" "10011") "seed10011_phsp01" "RunId should match expected format"
+            let settings = buildSettings appRoot
+            let ensured = Bootstrap.ensureRootFolders settings
+            Expect.isOk ensured "Bootstrap should create required folders"
 
-        testCase "Generated input file name follows expected pattern"
-        <| fun _ ->
-            Expect.equal
-                (buildInputFileName "10011" "01")
-                "seed10011_phsp01.txt"
-                "Generated filename should match expected format"
+            let expectedFolders = [
+                Path.Combine(appRoot, "templates")
+                Path.Combine(appRoot, "inputs")
+                Path.Combine(appRoot, "runs")
+                Path.Combine(appRoot, "outputs")
+                Path.Combine(appRoot, "database")
+                Path.Combine(appRoot, "logs")
+            ]
 
-        testCase "Run folder and output path planning uses runs/seedBase/seed_phsp"
-        <| fun _ ->
-            let settings = {
-                AppRoot = @"C:\app-root"
-                Paths = {
-                    Templates = "templates"
-                    Inputs = "inputs"
-                    Runs = "runs"
-                    Outputs = "outputs"
-                    Database = "database\\app.db"
-                    Logs = "logs"
-                }
-                Placeholders = {
-                    PhaseSpaceFile = "__PHSP_FILE__"
-                    OutputFile = "__OUTPUT_FILE__"
-                    Seed = "__SEED__"
-                }
-                Seed = { CurrentBase = "1001" }
-                Topas = { Executable = "topas" }
-                Slurm = {
-                    Partition = "compute"
-                    CpusPerTask = 1
-                }
-                Nodes = [ { Name = "node01"; Digit = "1" } ]
-                PhaseSpaceFiles = [
-                    {
-                        Index = "01"
-                        Value = "ps01.IAEAphsp"
-                    }
-                ]
-            }
+            expectedFolders
+            |> List.iter (fun folder -> Expect.isTrue (Directory.Exists folder) $"Expected folder '{folder}'")
 
-            let planned =
-                planGeneratedRuns settings "1001" "template" settings.Nodes settings.PhaseSpaceFiles
-
-            let firstRun = planned |> List.head
-            let normalizedRunFolder = firstRun.RunFolder.Replace('\\', '/')
-            let normalizedOutputPath = firstRun.OutputFilePath.Replace('\\', '/')
-
-            Expect.isTrue
-                (normalizedRunFolder.EndsWith("runs/1001"))
-                "Run folder should end with runs/1001"
-
-            Expect.isTrue
-                (normalizedOutputPath.EndsWith("runs/1001/seed10011_phsp01"))
-                "Output file path should end with runs/1001/seed10011_phsp01"
-
-        testCase "Placeholder replacement applies all configured tokens"
-        <| fun _ ->
-            let placeholders = {
-                PhaseSpaceFile = "__PHSP_FILE__"
-                OutputFile = "__OUTPUT_FILE__"
-                Seed = "__SEED__"
-            }
-
-            let sourceText = "seed=__SEED__; phsp=__PHSP_FILE__; output=__OUTPUT_FILE__"
-
-            let replaced =
-                applyConfiguredPlaceholders
-                    placeholders
-                    "ps01.IAEAphsp"
-                    @"C:\runs\1001\seed10011_phsp01"
-                    "10011"
-                    sourceText
-
-            Expect.equal
-                replaced
-                "seed=10011; phsp=ps01.IAEAphsp; output=C:\\runs\\1001\\seed10011_phsp01"
-                "All placeholders should be replaced"
-
-        testCase "Stitched text keeps input ordering"
-        <| fun _ ->
-            let stitched = stitchTemplateTexts [ "A"; "B"; "C" ]
-            let indexA = stitched.IndexOf("A")
-            let indexB = stitched.IndexOf("B")
-            let indexC = stitched.IndexOf("C")
-            Expect.isTrue (indexA < indexB && indexB < indexC) "A should appear before B, and B before C"
-
-        testCase "Planning expands nodes and phase-space files deterministically"
-        <| fun _ ->
-            let settings = {
-                AppRoot = @"C:\app-root"
-                Paths = {
-                    Templates = "templates"
-                    Inputs = "inputs"
-                    Runs = "runs"
-                    Outputs = "outputs"
-                    Database = "database\\app.db"
-                    Logs = "logs"
-                }
-                Placeholders = {
-                    PhaseSpaceFile = "__PHSP_FILE__"
-                    OutputFile = "__OUTPUT_FILE__"
-                    Seed = "__SEED__"
-                }
-                Seed = { CurrentBase = "1001" }
-                Topas = { Executable = "topas" }
-                Slurm = {
-                    Partition = "compute"
-                    CpusPerTask = 1
-                }
-                Nodes = [
-                    { Name = "node01"; Digit = "1" }
-                    { Name = "node02"; Digit = "2" }
-                    { Name = "node03"; Digit = "3" }
-                ]
-                PhaseSpaceFiles = [
-                    {
-                        Index = "01"
-                        Value = "ps01.IAEAphsp"
-                    }
-                    {
-                        Index = "02"
-                        Value = "ps02.IAEAphsp"
-                    }
-                ]
-            }
-
-            let selectedNodes = settings.Nodes |> List.take 2
-            let selectedPhaseSpaces = settings.PhaseSpaceFiles
-
-            let planned =
-                planGeneratedRuns settings "1001" "template" selectedNodes selectedPhaseSpaces
-
-            Expect.equal planned.Length 4 "2 phase-space files x 2 nodes should produce 4 planned runs"
-
-            let findSeed phase node =
-                planned
-                |> List.find (fun run -> run.PhaseSpaceIndex = phase && run.NodeDigit = node)
-                |> _.Seed
-
-            Expect.equal (findSeed "01" "1") "10011" "ps01 node1 seed should be 10011"
-            Expect.equal (findSeed "01" "2") "10012" "ps01 node2 seed should be 10012"
-            Expect.equal (findSeed "02" "1") "10011" "ps02 node1 seed should be 10011"
-            Expect.equal (findSeed "02" "2") "10012" "ps02 node2 seed should be 10012"
-
+            Expect.isFalse (Directory.Exists(Path.Combine(appRoot, "phsp-files"))) "Bootstrap should not create phsp-files"
+            Directory.Delete(appRoot, true)
     ]
 
 let generatePlanningTests =
@@ -257,57 +178,18 @@ let generatePlanningTests =
 
         testCase "Generated input file name follows expected pattern"
         <| fun _ ->
-            Expect.equal
-                (buildInputFileName "10011" "01")
-                "seed10011_phsp01.txt"
-                "Generated filename should match expected format"
+            Expect.equal (buildInputFileName "10011" "01") "seed10011_phsp01.txt" "Generated filename should match expected format"
 
         testCase "Run folder and output path planning uses runs/seedBase/seed_phsp"
         <| fun _ ->
-            let settings = {
-                AppRoot = @"C:\app-root"
-                Paths = {
-                    Templates = "templates"
-                    Inputs = "inputs"
-                    Runs = "runs"
-                    Outputs = "outputs"
-                    Database = "database\\app.db"
-                    Logs = "logs"
-                }
-                Placeholders = {
-                    PhaseSpaceFile = "__PHSP_FILE__"
-                    OutputFile = "__OUTPUT_FILE__"
-                    Seed = "__SEED__"
-                }
-                Seed = { CurrentBase = "1001" }
-                Topas = { Executable = "topas" }
-                Slurm = {
-                    Partition = "compute"
-                    CpusPerTask = 1
-                }
-                Nodes = [ { Name = "node01"; Digit = "1" } ]
-                PhaseSpaceFiles = [
-                    {
-                        Index = "01"
-                        Value = "ps01.IAEAphsp"
-                    }
-                ]
-            }
-
-            let planned =
-                planGeneratedRuns settings "1001" "template" settings.Nodes settings.PhaseSpaceFiles
-
+            let settings = (buildSettings @"C:\app-root")
+            let planned = planGeneratedRuns settings "1001" "template" settings.Nodes settings.PhaseSpaceFiles
             let firstRun = planned |> List.head
             let normalizedRunFolder = firstRun.RunFolder.Replace('\\', '/')
             let normalizedOutputPath = firstRun.OutputFilePath.Replace('\\', '/')
 
-            Expect.isTrue
-                (normalizedRunFolder.EndsWith("runs/1001"))
-                "Run folder should end with runs/1001"
-
-            Expect.isTrue
-                (normalizedOutputPath.EndsWith("runs/1001/seed10011_phsp01"))
-                "Output file path should end with runs/1001/seed10011_phsp01"
+            Expect.isTrue (normalizedRunFolder.EndsWith("runs/1001")) "Run folder should end with runs/1001"
+            Expect.isTrue (normalizedOutputPath.EndsWith("runs/1001/seed10011_phsp01")) "Output file path should end with runs/1001/seed10011_phsp01"
 
         testCase "Placeholder replacement applies all configured tokens"
         <| fun _ ->
@@ -320,17 +202,9 @@ let generatePlanningTests =
             let sourceText = "seed=__SEED__; phsp=__PHSP_FILE__; output=__OUTPUT_FILE__"
 
             let replaced =
-                applyConfiguredPlaceholders
-                    placeholders
-                    "ps01.IAEAphsp"
-                    @"C:\runs\1001\seed10011_phsp01"
-                    "10011"
-                    sourceText
+                applyConfiguredPlaceholders placeholders "ps01.IAEAphsp" @"C:\runs\1001\seed10011_phsp01" "10011" sourceText
 
-            Expect.equal
-                replaced
-                "seed=10011; phsp=ps01.IAEAphsp; output=C:\\runs\\1001\\seed10011_phsp01"
-                "All placeholders should be replaced"
+            Expect.equal replaced "seed=10011; phsp=ps01.IAEAphsp; output=C:\\runs\\1001\\seed10011_phsp01" "All placeholders should be replaced"
 
         testCase "Stitched text keeps input ordering"
         <| fun _ ->
@@ -342,49 +216,16 @@ let generatePlanningTests =
 
         testCase "Planning expands nodes and phase-space files deterministically"
         <| fun _ ->
-            let settings = {
-                AppRoot = @"C:\app-root"
-                Paths = {
-                    Templates = "templates"
-                    Inputs = "inputs"
-                    Runs = "runs"
-                    Outputs = "outputs"
-                    Database = "database\\app.db"
-                    Logs = "logs"
-                }
-                Placeholders = {
-                    PhaseSpaceFile = "__PHSP_FILE__"
-                    OutputFile = "__OUTPUT_FILE__"
-                    Seed = "__SEED__"
-                }
-                Seed = { CurrentBase = "1001" }
-                Topas = { Executable = "topas" }
-                Slurm = {
-                    Partition = "compute"
-                    CpusPerTask = 1
-                }
-                Nodes = [
-                    { Name = "node01"; Digit = "1" }
-                    { Name = "node02"; Digit = "2" }
-                    { Name = "node03"; Digit = "3" }
-                ]
-                PhaseSpaceFiles = [
-                    {
-                        Index = "01"
-                        Value = "ps01.IAEAphsp"
-                    }
-                    {
-                        Index = "02"
-                        Value = "ps02.IAEAphsp"
-                    }
-                ]
-            }
+            let settings =
+                { buildSettings @"C:\app-root" with
+                    Nodes = [
+                        { Name = "node01"; Digit = "1" }
+                        { Name = "node02"; Digit = "2" }
+                        { Name = "node03"; Digit = "3" }
+                    ] }
 
             let selectedNodes = settings.Nodes |> List.take 2
-            let selectedPhaseSpaces = settings.PhaseSpaceFiles
-
-            let planned =
-                planGeneratedRuns settings "1001" "template" selectedNodes selectedPhaseSpaces
+            let planned = planGeneratedRuns settings "1001" "template" selectedNodes settings.PhaseSpaceFiles
 
             Expect.equal planned.Length 4 "2 phase-space files x 2 nodes should produce 4 planned runs"
 
@@ -403,40 +244,13 @@ let generateCollisionTests =
     testList "Generate collisions" [
         testCase "Preflight fails when input seed folder already contains files"
         <| fun _ ->
-            let appRoot =
-                Path.Combine(Path.GetTempPath(), $"tsebt-collision-{Guid.NewGuid():N}")
-
+            let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-collision-{Guid.NewGuid():N}")
             Directory.CreateDirectory(appRoot) |> ignore
 
-            let settings = {
-                AppRoot = appRoot
-                Paths = {
-                    Templates = "templates"
-                    Inputs = "inputs"
-                    Runs = "runs"
-                    Outputs = "outputs"
-                    Database = "database\\app.db"
-                    Logs = "logs"
-                }
-                Placeholders = {
-                    PhaseSpaceFile = "__PHSP_FILE__"
-                    OutputFile = "__OUTPUT_FILE__"
-                    Seed = "__SEED__"
-                }
-                Seed = { CurrentBase = "1001" }
-                Topas = { Executable = "topas" }
-                Slurm = {
-                    Partition = "compute"
-                    CpusPerTask = 1
-                }
-                Nodes = [ { Name = "node01"; Digit = "1" } ]
-                PhaseSpaceFiles = [
-                    {
-                        Index = "01"
-                        Value = "ps01.IAEAphsp"
-                    }
-                ]
-            }
+            let settings =
+                { buildSettings appRoot with
+                    Nodes = [ { Name = "node01"; Digit = "1" } ]
+                    PhaseSpaceFiles = [ { Index = "01"; Value = "ps01.IAEAphsp" } ] }
 
             match Bootstrap.ensureRootFolders settings with
             | Error errorMessage -> failtestf "Failed creating root folders: %s" errorMessage
@@ -448,22 +262,16 @@ let generateCollisionTests =
                     let existingInputFolder = Path.Combine(appRoot, "inputs", usedSeedBase)
                     File.WriteAllText(Path.Combine(existingInputFolder, "already-there.txt"), "existing")
 
-                    let beforeFileCount =
-                        Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
-
-                    let plannedRuns =
-                        planGeneratedRuns settings usedSeedBase "template" settings.Nodes settings.PhaseSpaceFiles
+                    let beforeFileCount = Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
+                    let plannedRuns = planGeneratedRuns settings usedSeedBase "template" settings.Nodes settings.PhaseSpaceFiles
 
                     let result = preflightGenerateCollisions settings usedSeedBase plannedRuns
                     Expect.isError result "Preflight should fail when seed input folder already contains files"
 
-                    let afterFileCount =
-                        Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
-
+                    let afterFileCount = Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
                     Expect.equal afterFileCount beforeFileCount "Preflight should not write any new files"
 
             Directory.Delete(appRoot, true)
-
     ]
 
 let runPlanningTests =
@@ -494,35 +302,21 @@ let runPlanningTests =
         testCase "Slurm script includes topas command and log redirection"
         <| fun _ ->
             let settings = {
-                AppRoot = "/app"
-                Paths = {
-                    Templates = "templates"
-                    Inputs = "inputs"
-                    Runs = "runs"
-                    Outputs = "outputs"
-                    Database = "database/app.db"
-                    Logs = "logs"
-                }
-                Placeholders = {
-                    PhaseSpaceFile = "__PHSP_FILE__"
-                    OutputFile = "__OUTPUT_FILE__"
-                    Seed = "__SEED__"
-                }
-                Seed = { CurrentBase = "1001" }
-                Topas = { Executable = "topas" }
-                Slurm = {
-                    Partition = "compute"
-                    CpusPerTask = 1
-                }
-                Nodes = [ { Name = "node01"; Digit = "1" } ]
-                PhaseSpaceFiles = [ { Index = "01"; Value = "ps01.IAEAphsp" } ]
+                buildSettings "/app" with
+                    Paths = {
+                        Templates = "templates"
+                        Inputs = "inputs"
+                        Runs = "runs"
+                        Outputs = "outputs"
+                        Database = "database/app.db"
+                        Logs = "logs"
+                    }
+                    Nodes = [ { Name = "node01"; Digit = "1" } ]
+                    PhaseSpaceFiles = [ { Index = "01"; Value = "ps01.IAEAphsp" } ]
             }
 
-            let script =
-                buildSlurmScriptText settings "1001" "/app/runs/1001/run_manifest.tsv" 4
-
+            let script = buildSlurmScriptText settings "1001" "/app/runs/1001/run_manifest.tsv" 4
             Expect.stringContains script "\"topas\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" "Script should execute TOPAS and redirect log output"
-
     ]
 
 let collectCsvTests =
@@ -536,25 +330,8 @@ let collectCsvTests =
             let csvB = Path.Combine(folder, "node02.csv")
             let output = Path.Combine(folder, "phsp01_merged.csv")
 
-            File.WriteAllText(
-                csvA,
-                String.concat
-                    Environment.NewLine
-                    [ "# header"
-                      "x,y,dose"
-                      "0,0,1.0"
-                      "0,1,2.5" ]
-            )
-
-            File.WriteAllText(
-                csvB,
-                String.concat
-                    Environment.NewLine
-                    [ "# header"
-                      "x,y,dose"
-                      "0,0,3.0"
-                      "0,1,4.5" ]
-            )
+            File.WriteAllText(csvA, String.concat Environment.NewLine [ "# header"; "x,y,dose"; "0,0,1.0"; "0,1,2.5" ])
+            File.WriteAllText(csvB, String.concat Environment.NewLine [ "# header"; "x,y,dose"; "0,0,3.0"; "0,1,4.5" ])
 
             let merged = mergeNodeCsvFilesForPhaseSpace [ csvA; csvB ] output
             Expect.isOk merged "Merge should succeed for compatible csv files"
@@ -628,10 +405,10 @@ let server =
         <| async {
             let api = topasApi null
             let! result = api.getAppConfig ()
-
             Expect.isOk result "Config stub should succeed"
         }
         configTests
+        bootstrapTests
         generatePlanningTests
         generateCollisionTests
         runPlanningTests
