@@ -42,16 +42,8 @@ let private buildValidConfig () =
 
     ConfigurationBuilder().AddInMemoryCollection(values).Build() :> IConfiguration
 
-let server =
-    testList "Server" [
-        testCaseAsync "Topas API config stub returns Ok"
-        <| async {
-            let api = topasApi null
-            let! result = api.getAppConfig ()
-
-            Expect.isOk result "Config stub should succeed"
-        }
-
+let configTests =
+    testList "Config" [
         testCase "TSEBT load fails when nodes list is empty"
         <| fun _ ->
             let cfg = buildValidConfig ()
@@ -251,6 +243,164 @@ let server =
             Expect.equal (findSeed "02" "1") "10011" "ps02 node1 seed should be 10011"
             Expect.equal (findSeed "02" "2") "10012" "ps02 node2 seed should be 10012"
 
+    ]
+
+let generatePlanningTests =
+    testList "Generate planning" [
+        testCase "Seed construction appends node digit"
+        <| fun _ ->
+            Expect.equal (buildSeed "1001" "1") "10011" "Seed should append node digit 1"
+            Expect.equal (buildSeed "1001" "7") "10017" "Seed should append node digit 7"
+
+        testCase "RunId construction uses phase-space index and seed"
+        <| fun _ -> Expect.equal (buildRunId "01" "10011") "seed10011_phsp01" "RunId should match expected format"
+
+        testCase "Generated input file name follows expected pattern"
+        <| fun _ ->
+            Expect.equal
+                (buildInputFileName "10011" "01")
+                "seed10011_phsp01.txt"
+                "Generated filename should match expected format"
+
+        testCase "Run folder and output path planning uses runs/seedBase/seed_phsp"
+        <| fun _ ->
+            let settings = {
+                AppRoot = @"C:\app-root"
+                Paths = {
+                    Templates = "templates"
+                    Inputs = "inputs"
+                    Runs = "runs"
+                    Outputs = "outputs"
+                    Database = "database\\app.db"
+                    Logs = "logs"
+                }
+                Placeholders = {
+                    PhaseSpaceFile = "__PHSP_FILE__"
+                    OutputFile = "__OUTPUT_FILE__"
+                    Seed = "__SEED__"
+                }
+                Seed = { CurrentBase = "1001" }
+                Topas = { Executable = "topas" }
+                Slurm = {
+                    Partition = "compute"
+                    CpusPerTask = 1
+                }
+                Nodes = [ { Name = "node01"; Digit = "1" } ]
+                PhaseSpaceFiles = [
+                    {
+                        Index = "01"
+                        Value = "ps01.IAEAphsp"
+                    }
+                ]
+            }
+
+            let planned =
+                planGeneratedRuns settings "1001" "template" settings.Nodes settings.PhaseSpaceFiles
+
+            let firstRun = planned |> List.head
+            let normalizedRunFolder = firstRun.RunFolder.Replace('\\', '/')
+            let normalizedOutputPath = firstRun.OutputFilePath.Replace('\\', '/')
+
+            Expect.isTrue
+                (normalizedRunFolder.EndsWith("runs/1001"))
+                "Run folder should end with runs/1001"
+
+            Expect.isTrue
+                (normalizedOutputPath.EndsWith("runs/1001/seed10011_phsp01"))
+                "Output file path should end with runs/1001/seed10011_phsp01"
+
+        testCase "Placeholder replacement applies all configured tokens"
+        <| fun _ ->
+            let placeholders = {
+                PhaseSpaceFile = "__PHSP_FILE__"
+                OutputFile = "__OUTPUT_FILE__"
+                Seed = "__SEED__"
+            }
+
+            let sourceText = "seed=__SEED__; phsp=__PHSP_FILE__; output=__OUTPUT_FILE__"
+
+            let replaced =
+                applyConfiguredPlaceholders
+                    placeholders
+                    "ps01.IAEAphsp"
+                    @"C:\runs\1001\seed10011_phsp01"
+                    "10011"
+                    sourceText
+
+            Expect.equal
+                replaced
+                "seed=10011; phsp=ps01.IAEAphsp; output=C:\\runs\\1001\\seed10011_phsp01"
+                "All placeholders should be replaced"
+
+        testCase "Stitched text keeps input ordering"
+        <| fun _ ->
+            let stitched = stitchTemplateTexts [ "A"; "B"; "C" ]
+            let indexA = stitched.IndexOf("A")
+            let indexB = stitched.IndexOf("B")
+            let indexC = stitched.IndexOf("C")
+            Expect.isTrue (indexA < indexB && indexB < indexC) "A should appear before B, and B before C"
+
+        testCase "Planning expands nodes and phase-space files deterministically"
+        <| fun _ ->
+            let settings = {
+                AppRoot = @"C:\app-root"
+                Paths = {
+                    Templates = "templates"
+                    Inputs = "inputs"
+                    Runs = "runs"
+                    Outputs = "outputs"
+                    Database = "database\\app.db"
+                    Logs = "logs"
+                }
+                Placeholders = {
+                    PhaseSpaceFile = "__PHSP_FILE__"
+                    OutputFile = "__OUTPUT_FILE__"
+                    Seed = "__SEED__"
+                }
+                Seed = { CurrentBase = "1001" }
+                Topas = { Executable = "topas" }
+                Slurm = {
+                    Partition = "compute"
+                    CpusPerTask = 1
+                }
+                Nodes = [
+                    { Name = "node01"; Digit = "1" }
+                    { Name = "node02"; Digit = "2" }
+                    { Name = "node03"; Digit = "3" }
+                ]
+                PhaseSpaceFiles = [
+                    {
+                        Index = "01"
+                        Value = "ps01.IAEAphsp"
+                    }
+                    {
+                        Index = "02"
+                        Value = "ps02.IAEAphsp"
+                    }
+                ]
+            }
+
+            let selectedNodes = settings.Nodes |> List.take 2
+            let selectedPhaseSpaces = settings.PhaseSpaceFiles
+
+            let planned =
+                planGeneratedRuns settings "1001" "template" selectedNodes selectedPhaseSpaces
+
+            Expect.equal planned.Length 4 "2 phase-space files x 2 nodes should produce 4 planned runs"
+
+            let findSeed phase node =
+                planned
+                |> List.find (fun run -> run.PhaseSpaceIndex = phase && run.NodeDigit = node)
+                |> _.Seed
+
+            Expect.equal (findSeed "01" "1") "10011" "ps01 node1 seed should be 10011"
+            Expect.equal (findSeed "01" "2") "10012" "ps01 node2 seed should be 10012"
+            Expect.equal (findSeed "02" "1") "10011" "ps02 node1 seed should be 10011"
+            Expect.equal (findSeed "02" "2") "10012" "ps02 node2 seed should be 10012"
+    ]
+
+let generateCollisionTests =
+    testList "Generate collisions" [
         testCase "Preflight fails when input seed folder already contains files"
         <| fun _ ->
             let appRoot =
@@ -314,6 +464,10 @@ let server =
 
             Directory.Delete(appRoot, true)
 
+    ]
+
+let runPlanningTests =
+    testList "Run planning" [
         testCase "Parse Slurm job id from sbatch success output"
         <| fun _ ->
             let parsed = parseSlurmJobId "Submitted batch job 12345"
@@ -369,6 +523,10 @@ let server =
 
             Expect.stringContains script "\"topas\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" "Script should execute TOPAS and redirect log output"
 
+    ]
+
+let collectCsvTests =
+    testList "Collect csv/statistics" [
         testCase "Collect csv merge sums last numeric dose column across node files"
         <| fun _ ->
             let folder = Path.Combine(Path.GetTempPath(), $"collect-merge-{Guid.NewGuid():N}")
@@ -462,6 +620,22 @@ let server =
             let result = computeDoseSummary [ fileA; fileB ] summary
             Expect.isError result "Summary computation should fail for mismatched row counts"
             Directory.Delete(folder, true)
+    ]
+
+let server =
+    testList "Server" [
+        testCaseAsync "Topas API config stub returns Ok"
+        <| async {
+            let api = topasApi null
+            let! result = api.getAppConfig ()
+
+            Expect.isOk result "Config stub should succeed"
+        }
+        configTests
+        generatePlanningTests
+        generateCollisionTests
+        runPlanningTests
+        collectCsvTests
     ]
 
 let all = testList "All" [ Shared.Tests.shared; server ]
