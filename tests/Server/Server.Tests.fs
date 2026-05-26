@@ -16,6 +16,24 @@ open System.IO
 open Microsoft.Extensions.Configuration
 open Microsoft.Data.Sqlite
 
+/// Deletes a temporary test directory after clearing SQLite pools and finalizers.
+let private cleanupTestDirectory (path: string) =
+    if Directory.Exists path then
+        SqliteConnection.ClearAllPools()
+        GC.Collect()
+        GC.WaitForPendingFinalizers()
+
+        let rec deleteWithRetry retriesLeft =
+            try
+                Directory.Delete(path, true)
+            with
+            | :? IOException
+            | :? UnauthorizedAccessException when retriesLeft > 0 ->
+                System.Threading.Thread.Sleep(100)
+                deleteWithRetry (retriesLeft - 1)
+
+        deleteWithRetry 10
+
 /// Builds a minimal valid in-memory configuration for TSEBT settings tests.
 let private buildValidConfig () =
     let values =
@@ -164,7 +182,7 @@ let bootstrapTests =
             |> List.iter (fun folder -> Expect.isTrue (Directory.Exists folder) $"Expected folder '{folder}'")
 
             Expect.isFalse (Directory.Exists(Path.Combine(appRoot, "phsp-files"))) "Bootstrap should not create phsp-files"
-            Directory.Delete(appRoot, true)
+            cleanupTestDirectory appRoot
     ]
 
 let generatePlanningTests =
@@ -261,6 +279,7 @@ let generateCollisionTests =
                 | Ok _ ->
                     let usedSeedBase = "1001"
                     let existingInputFolder = Path.Combine(appRoot, "inputs", usedSeedBase)
+                    Directory.CreateDirectory(existingInputFolder) |> ignore
                     File.WriteAllText(Path.Combine(existingInputFolder, "already-there.txt"), "existing")
 
                     let beforeFileCount = Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
@@ -272,7 +291,7 @@ let generateCollisionTests =
                     let afterFileCount = Directory.GetFiles(existingInputFolder, "*", SearchOption.AllDirectories).Length
                     Expect.equal afterFileCount beforeFileCount "Preflight should not write any new files"
 
-            Directory.Delete(appRoot, true)
+            cleanupTestDirectory appRoot
     ]
 
 let generateFilesystemTests =
@@ -351,7 +370,7 @@ let generateFilesystemTests =
                         let runCount = Convert.ToInt32(runCommand.ExecuteScalar())
                         Expect.equal runCount 4 "generated_runs should contain four rows for seed base 1001"
 
-            Directory.Delete(appRoot, true)
+            cleanupTestDirectory appRoot
 
         testCase "Generate rejects second run for same seed and preserves original files"
         <| fun _ ->
@@ -388,7 +407,7 @@ let generateFilesystemTests =
                     let after = File.ReadAllText generatedFile
                     Expect.equal after before "Collision failure should not overwrite existing generated file"
 
-            Directory.Delete(appRoot, true)
+            cleanupTestDirectory appRoot
     ]
 
 let runPlanningTests =
@@ -524,7 +543,7 @@ let runSubmissionTests =
                         Expect.isFalse csvCheck.Ok "Existing .csv should fail csv collision check"
                         Expect.isFalse logCheck.Ok "Existing .log should fail log collision check"
 
-            Directory.Delete(appRoot, true)
+            cleanupTestDirectory appRoot
 
         testCase "Submit run blocks already submitted batch before sbatch"
         <| fun _ ->
@@ -556,7 +575,7 @@ let runSubmissionTests =
                     | Error message ->
                         Expect.stringContains message "already been submitted to Slurm as job 12345" "Error should mention existing Slurm job id"
 
-            Directory.Delete(appRoot, true)
+            cleanupTestDirectory appRoot
     ]
 
 let collectCsvTests =
@@ -687,123 +706,135 @@ let collectPlanningTests =
         <| fun _ ->
             let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-collect-preflight-ok-{Guid.NewGuid():N}")
             Directory.CreateDirectory(appRoot) |> ignore
-            let settings = buildSettings appRoot
-            Bootstrap.ensureRootFolders settings |> ignore
-            initialize settings |> ignore
+            try
+                let settings = buildSettings appRoot
+                Bootstrap.ensureRootFolders settings |> ignore
+                initialize settings |> ignore
 
-            let inputFolder = Path.Combine(appRoot, "inputs", "1001")
-            let runFolder = Path.Combine(appRoot, "runs", "1001")
-            Directory.CreateDirectory(inputFolder) |> ignore
-            Directory.CreateDirectory(runFolder) |> ignore
+                let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+                let runFolder = Path.Combine(appRoot, "runs", "1001")
+                Directory.CreateDirectory(inputFolder) |> ignore
+                Directory.CreateDirectory(runFolder) |> ignore
 
-            let row = ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
+                let row = ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
 
-            let dbPath = Path.Combine(appRoot, "database", "app.db")
-            let csb = SqliteConnectionStringBuilder()
-            csb.DataSource <- dbPath
-            use conn = new SqliteConnection(csb.ConnectionString)
-            conn.Open()
-            seedGeneratedBatch conn "1001" [ row ]
+                let dbPath = Path.Combine(appRoot, "database", "app.db")
+                let csb = SqliteConnectionStringBuilder()
+                csb.DataSource <- dbPath
 
-            File.WriteAllText(Path.Combine(inputFolder, "seed10011_phsp01.txt"), "input")
-            File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1")
-            File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
+                do
+                    use conn = new SqliteConnection(csb.ConnectionString)
+                    conn.Open()
+                    seedGeneratedBatch conn "1001" [ row ]
 
-            let preflight = CollectOperation.preflightCollect settings "1001"
-            Expect.isOk preflight "Preflight should succeed"
-            match preflight with
-            | Ok result -> Expect.isTrue result.CanCollect "All files present should allow collect"
-            | Error _ -> ()
+                File.WriteAllText(Path.Combine(inputFolder, "seed10011_phsp01.txt"), "input")
+                File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1")
+                File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
 
-            Directory.Delete(appRoot, true)
+                let preflight = CollectOperation.preflightCollect settings "1001"
+                Expect.isOk preflight "Preflight should succeed"
+                match preflight with
+                | Ok result -> Expect.isTrue result.CanCollect "All files present should allow collect"
+                | Error _ -> ()
+            finally
+                cleanupTestDirectory appRoot
 
         testCase "Collect preflight blocks missing csv and allows missing logs as warning"
         <| fun _ ->
             let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-collect-preflight-missing-{Guid.NewGuid():N}")
             Directory.CreateDirectory(appRoot) |> ignore
-            let settings = buildSettings appRoot
-            Bootstrap.ensureRootFolders settings |> ignore
-            initialize settings |> ignore
+            try
+                let settings = buildSettings appRoot
+                Bootstrap.ensureRootFolders settings |> ignore
+                initialize settings |> ignore
 
-            let inputFolder = Path.Combine(appRoot, "inputs", "1001")
-            let runFolder = Path.Combine(appRoot, "runs", "1001")
-            Directory.CreateDirectory(inputFolder) |> ignore
-            Directory.CreateDirectory(runFolder) |> ignore
+                let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+                let runFolder = Path.Combine(appRoot, "runs", "1001")
+                Directory.CreateDirectory(inputFolder) |> ignore
+                Directory.CreateDirectory(runFolder) |> ignore
 
-            let row = ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
-            let dbPath = Path.Combine(appRoot, "database", "app.db")
-            let csb = SqliteConnectionStringBuilder()
-            csb.DataSource <- dbPath
-            use conn = new SqliteConnection(csb.ConnectionString)
-            conn.Open()
-            seedGeneratedBatch conn "1001" [ row ]
-            File.WriteAllText(Path.Combine(inputFolder, "seed10011_phsp01.txt"), "input")
+                let row = ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
+                let dbPath = Path.Combine(appRoot, "database", "app.db")
+                let csb = SqliteConnectionStringBuilder()
+                csb.DataSource <- dbPath
 
-            let preflightMissingCsv = CollectOperation.preflightCollect settings "1001"
-            Expect.isOk preflightMissingCsv "Preflight should return result for missing csv case"
-            match preflightMissingCsv with
-            | Ok result ->
-                Expect.isFalse result.CanCollect "Missing csv should block collect"
-                Expect.equal result.MissingCsvCount 1 "Missing csv count should be one"
-            | Error _ -> ()
+                do
+                    use conn = new SqliteConnection(csb.ConnectionString)
+                    conn.Open()
+                    seedGeneratedBatch conn "1001" [ row ]
 
-            File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1")
-            let preflightMissingLog = CollectOperation.preflightCollect settings "1001"
-            Expect.isOk preflightMissingLog "Preflight should return result for missing log case"
-            match preflightMissingLog with
-            | Ok result ->
-                Expect.isTrue result.CanCollect "Missing logs should not block collect in current behavior"
-                Expect.equal result.MissingLogCount 1 "Missing log count should be one"
-            | Error _ -> ()
+                File.WriteAllText(Path.Combine(inputFolder, "seed10011_phsp01.txt"), "input")
 
-            Directory.Delete(appRoot, true)
+                let preflightMissingCsv = CollectOperation.preflightCollect settings "1001"
+                Expect.isOk preflightMissingCsv "Preflight should return result for missing csv case"
+                match preflightMissingCsv with
+                | Ok result ->
+                    Expect.isFalse result.CanCollect "Missing csv should block collect"
+                    Expect.equal result.MissingCsvCount 1 "Missing csv count should be one"
+                | Error _ -> ()
+
+                File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1")
+                let preflightMissingLog = CollectOperation.preflightCollect settings "1001"
+                Expect.isOk preflightMissingLog "Preflight should return result for missing log case"
+                match preflightMissingLog with
+                | Ok result ->
+                    Expect.isTrue result.CanCollect "Missing logs should not block collect in current behavior"
+                    Expect.equal result.MissingLogCount 1 "Missing log count should be one"
+                | Error _ -> ()
+            finally
+                cleanupTestDirectory appRoot
 
         testCase "Collect operation writes outputs and updates sqlite status"
         <| fun _ ->
             let appRoot = Path.Combine(Path.GetTempPath(), $"tsebt-collect-op-{Guid.NewGuid():N}")
             Directory.CreateDirectory(appRoot) |> ignore
-            let settings = buildSettings appRoot
-            Bootstrap.ensureRootFolders settings |> ignore
-            initialize settings |> ignore
+            try
+                let settings = buildSettings appRoot
+                Bootstrap.ensureRootFolders settings |> ignore
+                initialize settings |> ignore
 
-            let inputFolder = Path.Combine(appRoot, "inputs", "1001")
-            let runFolder = Path.Combine(appRoot, "runs", "1001")
-            Directory.CreateDirectory(inputFolder) |> ignore
-            Directory.CreateDirectory(runFolder) |> ignore
+                let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+                let runFolder = Path.Combine(appRoot, "runs", "1001")
+                Directory.CreateDirectory(inputFolder) |> ignore
+                Directory.CreateDirectory(runFolder) |> ignore
 
-            let rows = [
-                ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
-                ("seed10012_phsp01", "01", "2", Path.Combine(inputFolder, "seed10012_phsp01.txt"), Path.Combine(runFolder, "seed10012_phsp01"))
-            ]
+                let rows = [
+                    ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
+                    ("seed10012_phsp01", "01", "2", Path.Combine(inputFolder, "seed10012_phsp01.txt"), Path.Combine(runFolder, "seed10012_phsp01"))
+                ]
 
-            let dbPath = Path.Combine(appRoot, "database", "app.db")
-            let csb = SqliteConnectionStringBuilder()
-            csb.DataSource <- dbPath
-            use conn = new SqliteConnection(csb.ConnectionString)
-            conn.Open()
-            seedGeneratedBatch conn "1001" rows
+                let dbPath = Path.Combine(appRoot, "database", "app.db")
+                let csb = SqliteConnectionStringBuilder()
+                csb.DataSource <- dbPath
 
-            File.WriteAllText(Path.Combine(inputFolder, "seed10011_phsp01.txt"), "input")
-            File.WriteAllText(Path.Combine(inputFolder, "seed10012_phsp01.txt"), "input")
-            File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1.0")
-            File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,dose\n0,0,2.0")
-            File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
-            File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
+                do
+                    use conn = new SqliteConnection(csb.ConnectionString)
+                    conn.Open()
+                    seedGeneratedBatch conn "1001" rows
 
-            let result = CollectOperation.collectBatch settings { SeedBase = "1001" }
-            Expect.isOk result "Collect operation should succeed for complete inputs"
+                File.WriteAllText(Path.Combine(inputFolder, "seed10011_phsp01.txt"), "input")
+                File.WriteAllText(Path.Combine(inputFolder, "seed10012_phsp01.txt"), "input")
+                File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1.0")
+                File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,dose\n0,0,2.0")
+                File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
+                File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
 
-            let outputFolder = Path.Combine(appRoot, "outputs", "1001")
-            Expect.isTrue (File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv"))) "Collect manifest should be written"
-            Expect.isTrue (File.Exists(Path.Combine(outputFolder, "phsp01_merged.csv"))) "Merged phase-space csv should be written"
-            Expect.isTrue (File.Exists(Path.Combine(outputFolder, "dose_summary.csv"))) "Dose summary should be written"
+                let result = CollectOperation.collectBatch settings { SeedBase = "1001" }
+                Expect.isOk result "Collect operation should succeed for complete inputs"
 
-            use statusCommand = conn.CreateCommand()
-            statusCommand.CommandText <- "SELECT collect_status FROM generated_batches WHERE seed_base = '1001';"
-            let collectStatus = string (statusCommand.ExecuteScalar())
-            Expect.equal collectStatus "Collected" "Collect status should be updated in SQLite"
+                let outputFolder = Path.Combine(appRoot, "outputs", "1001")
+                Expect.isTrue (File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv"))) "Collect manifest should be written"
+                Expect.isTrue (File.Exists(Path.Combine(outputFolder, "phsp01_merged.csv"))) "Merged phase-space csv should be written"
+                Expect.isTrue (File.Exists(Path.Combine(outputFolder, "dose_summary.csv"))) "Dose summary should be written"
 
-            Directory.Delete(appRoot, true)
+                use conn = new SqliteConnection(csb.ConnectionString)
+                conn.Open()
+                use statusCommand = conn.CreateCommand()
+                statusCommand.CommandText <- "SELECT collect_status FROM generated_batches WHERE seed_base = '1001';"
+                let collectStatus = string (statusCommand.ExecuteScalar())
+                Expect.equal collectStatus "Collected" "Collect status should be updated in SQLite"
+            finally
+                cleanupTestDirectory appRoot
     ]
 
 let server =
