@@ -5,7 +5,11 @@
     <IsTestProject>true</IsTestProject>
   </PropertyGroup>
   <ItemGroup>
-    <Compile Include="Server.Tests.fs" />
+    <Compile Include="TestHelpers.fs" />
+    <Compile Include="ConfigTests.fs" />
+    <Compile Include="GenerateTests.fs" />
+    <Compile Include="RunTests.fs" />
+    <Compile Include="CollectTests.fs" />
   </ItemGroup>
   <ItemGroup>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
