@@ -246,9 +246,15 @@ let preflightRun (settings: TsebtSettings) (seedBase: string) : Result<RunPrefli
 
 /// Builds one manifest preview row from one generated run row.
 let toManifestPreviewRow (settings: TsebtSettings) (seedBase: string) (taskId: int) (row: RunManifestRow) : RunManifestPreviewRow =
+    let nodeName =
+        settings.Nodes
+        |> List.tryFind (fun configuredNode -> configuredNode.Digit = row.NodeDigit)
+        |> Option.map _.Name
+        |> Option.defaultValue $"node{row.NodeDigit.PadLeft(2, '0')}"
+
     {
         TaskId = taskId
-        NodeName = $"node{row.NodeDigit.PadLeft(2, '0')}"
+        NodeName = nodeName
         RunId = row.RunId
         InputFilePath = row.InputFilePath
         LogFilePath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, $"{row.RunId}.log")
@@ -286,6 +292,7 @@ let buildSlurmScriptText
         ""
         "set -euo pipefail"
         ""
+        $"TOPAS=\"{settings.Topas.Executable}\""
         $"MANIFEST=\"{manifestPath}\""
         "ROW=$(awk -F '\\t' -v task_id=\"$SLURM_ARRAY_TASK_ID\" '$1 == task_id { print; exit }' \"$MANIFEST\")"
         "if [ -z \"$ROW\" ]; then"
@@ -293,7 +300,7 @@ let buildSlurmScriptText
         "  exit 1"
         "fi"
         "IFS=$'\\t' read -r TASK_ID NODE_NAME RUN_ID INPUT_FILE LOG_FILE <<< \"$ROW\""
-        $"\"{settings.Topas.Executable}\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1"
+        "srun --nodes=1 --ntasks=1 --nodelist=\"$NODE_NAME\" \"$TOPAS\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1"
     ]
     |> String.concat "\n"
 

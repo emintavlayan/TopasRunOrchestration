@@ -416,7 +416,33 @@ let runPlanningTests =
             let line = formatManifestRow row
             Expect.equal line "1\tnode01\tseed10011_phsp01\t/app/inputs/1001/seed10011_phsp01.txt\t/app/runs/1001/seed10011_phsp01.log" "Manifest row should use tab-separated layout"
 
-        testCase "Slurm script includes topas command and log redirection"
+        testCase "Manifest preview rows preserve configured node names"
+        <| fun _ ->
+            let settings =
+                { buildSettings "/app" with
+                    Nodes = [
+                        { Name = "monte-carlo-01"; Digit = "1" }
+                        { Name = "monte-carlo-02"; Digit = "2" }
+                    ] }
+
+            let row1 = {
+                RunId = "seed10011_phsp01"
+                InputFilePath = "/app/inputs/1001/seed10011_phsp01.txt"
+                OutputFilePath = "/app/runs/1001/seed10011_phsp01"
+                RunFolder = "/app/runs/1001"
+                Seed = "10011"
+                NodeDigit = "1"
+                PhaseSpaceIndex = "01"
+            }
+
+            let row2 = { row1 with RunId = "seed10012_phsp01"; NodeDigit = "2" }
+            let preview1 = toManifestPreviewRow settings "1001" 1 row1
+            let preview2 = toManifestPreviewRow settings "1001" 2 row2
+
+            Expect.equal preview1.NodeName "monte-carlo-01" "Node digit 1 should map to configured node name"
+            Expect.equal preview2.NodeName "monte-carlo-02" "Node digit 2 should map to configured node name"
+
+        testCase "Slurm script includes srun node assignment and log redirection"
         <| fun _ ->
             let settings = {
                 buildSettings "/app" with
@@ -433,9 +459,13 @@ let runPlanningTests =
             }
 
             let script = buildSlurmScriptText settings "1001" "/app/runs/1001/run_manifest.tsv" 4
-            Expect.stringContains script "\"topas\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" "Script should execute TOPAS and redirect log output"
+            Expect.stringContains script "TOPAS=\"topas\"" "Script should define TOPAS variable from configuration"
+            Expect.stringContains script "MANIFEST=\"/app/runs/1001/run_manifest.tsv\"" "Script should define manifest variable"
+            Expect.stringContains script "srun --nodes=1 --ntasks=1 --nodelist=\"$NODE_NAME\"" "Script should run each task on manifest node"
+            Expect.stringContains script "\"$TOPAS\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" "Script should execute TOPAS and redirect log output"
             Expect.stringContains script "#SBATCH --job-name=tsebt-1001" "Script should include seed batch job name"
             Expect.stringContains script "#SBATCH --partition=compute" "Script should include configured partition"
+            Expect.stringContains script "#SBATCH --cpus-per-task=1" "Script should include configured cpu count"
             Expect.stringContains script "#SBATCH --array=1-4" "Script should include array task range"
             Expect.stringContains script "SLURM_ARRAY_TASK_ID" "Script should resolve row by task id"
     ]
