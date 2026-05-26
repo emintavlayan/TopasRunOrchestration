@@ -12,9 +12,9 @@ open SAFE
 /// Returns classes for top-level navigation buttons in selected/unselected state.
 let tabButtonClass (isSelected: bool) =
     if isSelected then
-        "w-full rounded-lg border border-blue-700 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700"
+        "tab tab-active font-semibold"
     else
-        "w-full rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+        "tab font-medium text-base-content/70"
 
 /// Renders one top-level tab button.
 let tabButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
@@ -42,18 +42,28 @@ let viewPageContent (model: Model) (dispatch: Msg -> unit) =
 /// Renders the client landing page and selected content.
 let view (model: Model) (dispatch: Msg -> unit) =
     Html.main [
-        prop.className "min-h-screen bg-slate-100 text-slate-900"
+        prop.className "min-h-screen bg-base-200 text-base-content"
         prop.children [
             Html.section [
-                prop.className "mx-auto w-full max-w-4xl p-8"
+                prop.className "mx-auto w-[96vw] max-w-[1600px] px-4 py-6"
                 prop.children [
                     Html.h1 [ prop.className "text-3xl font-semibold"; prop.text "TopasRunOrchestration" ]
                     Html.div [
-                        prop.className "mt-6 grid grid-cols-3 gap-2 rounded-xl border border-slate-300 bg-white p-2 shadow-sm"
+                        prop.className "card mt-6 bg-base-100 shadow"
                         prop.children [
-                            tabButton model.SelectedPage Generate dispatch
-                            tabButton model.SelectedPage Run dispatch
-                            tabButton model.SelectedPage Collect dispatch
+                            Html.div [
+                                prop.className "card-body p-3"
+                                prop.children [
+                                    Html.div [
+                                        prop.className "tabs tabs-boxed w-full bg-base-200 p-1"
+                                        prop.children [
+                                            tabButton model.SelectedPage Generate dispatch
+                                            tabButton model.SelectedPage Run dispatch
+                                            tabButton model.SelectedPage Collect dispatch
+                                        ]
+                                    ]
+                                ]
+                            ]
                         ]
                     ]
                     Html.div [
