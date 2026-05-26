@@ -1,4 +1,4 @@
-module Server.XUnit.Tests
+module Server.Tests
 
 open System
 open System.IO
