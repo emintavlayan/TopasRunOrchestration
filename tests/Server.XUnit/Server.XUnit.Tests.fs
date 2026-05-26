@@ -140,10 +140,100 @@ let ``Config fails for duplicate node digits`` () =
     Assert.True(Result.isError (TsebtConfig.load cfg))
 
 [<Fact>]
+let ``Config fails when AppRoot is missing`` () =
+    let cfg = buildValidConfig ()
+    cfg.["Tsebt:AppRoot"] <- null
+    Assert.True(Result.isError (TsebtConfig.load cfg))
+
+[<Fact>]
+let ``Config fails when nodes are empty`` () =
+    let cfg = buildValidConfig ()
+    cfg.["Tsebt:Nodes:0:Name"] <- null
+    cfg.["Tsebt:Nodes:0:Digit"] <- null
+    cfg.["Tsebt:Nodes:1:Name"] <- null
+    cfg.["Tsebt:Nodes:1:Digit"] <- null
+    Assert.True(Result.isError (TsebtConfig.load cfg))
+
+[<Fact>]
+let ``Config fails when phase-space files are empty`` () =
+    let cfg = buildValidConfig ()
+    cfg.["Tsebt:PhaseSpaceFiles:0:Index"] <- null
+    cfg.["Tsebt:PhaseSpaceFiles:0:Value"] <- null
+    cfg.["Tsebt:PhaseSpaceFiles:1:Index"] <- null
+    cfg.["Tsebt:PhaseSpaceFiles:1:Value"] <- null
+    Assert.True(Result.isError (TsebtConfig.load cfg))
+
+[<Fact>]
+let ``Config fails for duplicate phase-space indexes`` () =
+    let cfg = buildValidConfig ()
+    cfg.["Tsebt:PhaseSpaceFiles:1:Index"] <- "01"
+    Assert.True(Result.isError (TsebtConfig.load cfg))
+
+[<Fact>]
+let ``Config fails for non-numeric seed base`` () =
+    let cfg = buildValidConfig ()
+    cfg.["Tsebt:Seed:CurrentBase"] <- "seed-x"
+    Assert.True(Result.isError (TsebtConfig.load cfg))
+
+[<Fact>]
+let ``Config fails for empty placeholders`` () =
+    let cfg = buildValidConfig ()
+    cfg.["Tsebt:Placeholders:Seed"] <- ""
+    Assert.True(Result.isError (TsebtConfig.load cfg))
+
+[<Fact>]
+let ``Bootstrap creates required folders and not phsp-files`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-bootstrap-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "templates")))
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "inputs")))
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "runs")))
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "outputs")))
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "database")))
+        Assert.True(Directory.Exists(Path.Combine(appRoot, "logs")))
+        Assert.False(Directory.Exists(Path.Combine(appRoot, "phsp-files")))
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
 let ``Seed and RunId planning follows conventions`` () =
     Assert.Equal("10011", buildSeed "1001" "1")
     Assert.Equal("seed10011_phsp01", buildRunId "01" "10011")
     Assert.Equal("seed10011_phsp01.txt", buildInputFileName "10011" "01")
+
+[<Fact>]
+let ``Run folder and output path planning use runs seed folder`` () =
+    let settings = buildSettings @"C:\app-root"
+    let planned = planGeneratedRuns settings "1001" "template" settings.Nodes settings.PhaseSpaceFiles
+    let firstRun = planned |> List.head
+    let normalizedRunFolder = firstRun.RunFolder.Replace('\\', '/')
+    let normalizedOutputPath = firstRun.OutputFilePath.Replace('\\', '/')
+    Assert.EndsWith("runs/1001", normalizedRunFolder)
+    Assert.EndsWith("runs/1001/seed10011_phsp01", normalizedOutputPath)
+
+[<Fact>]
+let ``Placeholder replacement applies configured tokens`` () =
+    let placeholders = {
+        PhaseSpaceFile = "__PHSP_FILE__"
+        OutputFile = "__OUTPUT_FILE__"
+        Seed = "__SEED__"
+    }
+
+    let sourceText = "seed=__SEED__; phsp=__PHSP_FILE__; output=__OUTPUT_FILE__"
+    let replaced = applyConfiguredPlaceholders placeholders "ps01.IAEAphsp" @"C:\runs\1001\seed10011_phsp01" "10011" sourceText
+    Assert.Equal("seed=10011; phsp=ps01.IAEAphsp; output=C:\\runs\\1001\\seed10011_phsp01", replaced)
+
+[<Fact>]
+let ``Stitched template text keeps ordering`` () =
+    let stitched = stitchTemplateTexts [ "A"; "B"; "C" ]
+    let indexA = stitched.IndexOf("A")
+    let indexB = stitched.IndexOf("B")
+    let indexC = stitched.IndexOf("C")
+    Assert.True(indexA < indexB && indexB < indexC)
 
 [<Fact>]
 let ``Generate planning expands node and phase-space grid`` () =
@@ -216,6 +306,22 @@ let ``Run script includes srun node assignment and topas redirect`` () =
     Assert.Contains("--array=1-4", script)
     Assert.Contains("srun --nodes=1 --ntasks=1 --nodelist=\"$NODE_NAME\"", script)
     Assert.Contains("\"$TOPAS\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1", script)
+
+[<Fact>]
+let ``Manifest preview rows preserve configured node names`` () =
+    let settings = buildSettings @"C:\app-root"
+    let row = {
+        RunId = "seed10011_phsp01"
+        InputFilePath = @"C:\app-root\inputs\1001\seed10011_phsp01.txt"
+        OutputFilePath = @"C:\app-root\runs\1001\seed10011_phsp01"
+        RunFolder = @"C:\app-root\runs\1001"
+        Seed = "10011"
+        NodeDigit = "1"
+        PhaseSpaceIndex = "01"
+    }
+
+    let preview = toManifestPreviewRow settings "1001" 1 row
+    Assert.Equal("monte-carlo-01", preview.NodeName)
 
 [<Fact>]
 let ``Run preflight blocks existing csv and log outputs`` () =
@@ -307,6 +413,40 @@ let ``Collect preflight blocks missing csv and allows missing log`` () =
         File.WriteAllText(outputBase + ".csv", "x,y,dose\n0,0,1")
         let missingLog = assertOk (preflightCollect settings "1001")
         Assert.True(missingLog.CanCollect)
+        Assert.Equal(1, missingLog.MissingLogCount)
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
+let ``Collect preflight passes when csv and log exist`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-ok-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        assertOk (initialize settings) |> ignore
+
+        let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+        let runFolder = Path.Combine(appRoot, "runs", "1001")
+        Directory.CreateDirectory(inputFolder) |> ignore
+        Directory.CreateDirectory(runFolder) |> ignore
+
+        let inputPath = Path.Combine(inputFolder, "seed10011_phsp01.txt")
+        let outputBase = Path.Combine(runFolder, "seed10011_phsp01")
+        File.WriteAllText(inputPath, "input")
+        File.WriteAllText(outputBase + ".csv", "x,y,dose\n0,0,1")
+        File.WriteAllText(outputBase + ".log", "ok")
+
+        let dbPath = Path.Combine(appRoot, "database", "app.db")
+        let csb = SqliteConnectionStringBuilder()
+        csb.DataSource <- dbPath
+        use conn = new SqliteConnection(csb.ConnectionString)
+        conn.Open()
+        seedGeneratedBatch conn "1001" [ ("seed10011_phsp01", "01", "1", inputPath, outputBase) ]
+
+        let preflight = assertOk (preflightCollect settings "1001")
+        Assert.True(preflight.CanCollect)
     finally
         cleanupTestDirectory appRoot
 
@@ -368,6 +508,21 @@ let ``Collect statistics computes mean median sd count`` () =
         cleanupTestDirectory folder
 
 [<Fact>]
+let ``Collect statistics fails on mismatched row counts`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"xunit-stats-mismatch-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(folder) |> ignore
+
+    try
+        let a = Path.Combine(folder, "phsp01.csv")
+        let b = Path.Combine(folder, "phsp02.csv")
+        let summary = Path.Combine(folder, "dose_summary.csv")
+        File.WriteAllText(a, "x,y,dose\n0,0,1\n0,1,2")
+        File.WriteAllText(b, "x,y,dose\n0,0,3")
+        Assert.True(Result.isError (computeDoseSummary [ a; b ] summary))
+    finally
+        cleanupTestDirectory folder
+
+[<Fact>]
 let ``Collect operation writes outputs and updates status`` () =
     let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-op-{Guid.NewGuid():N}")
     Directory.CreateDirectory(appRoot) |> ignore
@@ -407,5 +562,10 @@ let ``Collect operation writes outputs and updates status`` () =
         Assert.True(File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv")))
         Assert.True(File.Exists(Path.Combine(outputFolder, "phsp01_merged.csv")))
         Assert.True(File.Exists(Path.Combine(outputFolder, "dose_summary.csv")))
+
+        use statusCommand = conn.CreateCommand()
+        statusCommand.CommandText <- "SELECT collect_status FROM generated_batches WHERE seed_base = '1001';"
+        let status = string (statusCommand.ExecuteScalar())
+        Assert.Equal("Collected", status)
     finally
         cleanupTestDirectory appRoot
