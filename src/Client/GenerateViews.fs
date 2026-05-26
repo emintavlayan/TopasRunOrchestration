@@ -3,7 +3,7 @@ module GenerateViews
 open Feliz
 open GenerateLogic
 open GenerateTypes
-open SharedWizardViews
+open WizardShell
 open SAFE
 open Shared
 
@@ -17,16 +17,15 @@ let groupTemplateFiles (files: TemplateFileInfo list) : (string * TemplateFileIn
 /// Renders a checkbox with label text.
 let checkBoxRow (isChecked: bool) (labelText: string) (onToggle: unit -> unit) =
     Html.label [
-        prop.className "flex items-center gap-3 py-1"
+        prop.className "label cursor-pointer justify-start gap-3 rounded px-2 py-2 hover:bg-base-200"
         prop.children [
             Html.input [
                 prop.type'.checkbox
                 prop.isChecked isChecked
-                prop.className "h-4 w-4 rounded border-slate-300 focus:ring-blue-500"
-                prop.style [ style.custom ("accent-color", "#1d4ed8") ]
+                prop.className "checkbox checkbox-primary checkbox-sm"
                 prop.onChange (fun (_: bool) -> onToggle ())
             ]
-            Html.span labelText
+            Html.span [ prop.className "label-text"; prop.text labelText ]
         ]
     ]
 
@@ -93,21 +92,24 @@ let viewNodes (generate: GenerateModel) (dispatch: Msg -> unit) =
                 prop.className "mb-3 flex gap-2"
                 prop.children [
                     Html.button [
-                        prop.className secondaryButtonClass
+                        prop.className "btn btn-outline btn-sm"
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllNodes)
                     ]
                     Html.button [
-                        prop.className secondaryButtonClass
+                        prop.className "btn btn-outline btn-sm"
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoNodes)
                     ]
                 ]
             ]
             Html.div [
-                for node in config.Nodes |> List.sortBy _.Digit do
-                    checkBoxRow (generate.SelectedNodes.Contains node.Digit) $"{node.Digit} {node.Name}" (fun () ->
-                        dispatch (ToggleNode node.Digit))
+                prop.className "grid gap-1 md:grid-cols-2"
+                prop.children [
+                    for node in config.Nodes |> List.sortBy _.Digit do
+                        checkBoxRow (generate.SelectedNodes.Contains node.Digit) $"{node.Digit} {node.Name}" (fun () ->
+                            dispatch (ToggleNode node.Digit))
+                ]
             ]
         ]
     | _ -> Html.p "Loading nodes..."
@@ -121,23 +123,26 @@ let viewPhaseSpaceFiles (generate: GenerateModel) (dispatch: Msg -> unit) =
                 prop.className "mb-3 flex gap-2"
                 prop.children [
                     Html.button [
-                        prop.className secondaryButtonClass
+                        prop.className "btn btn-outline btn-sm"
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllPhaseSpaceFiles)
                     ]
                     Html.button [
-                        prop.className secondaryButtonClass
+                        prop.className "btn btn-outline btn-sm"
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoPhaseSpaceFiles)
                     ]
                 ]
             ]
             Html.div [
-                for phaseSpaceFile in config.PhaseSpaceFiles |> List.sortBy _.Index do
-                    checkBoxRow
-                        (generate.SelectedPhaseSpaceFiles.Contains phaseSpaceFile.Index)
-                        $"ps{phaseSpaceFile.Index}"
-                        (fun () -> dispatch (TogglePhaseSpaceFile phaseSpaceFile.Index))
+                prop.className "grid max-h-[50vh] gap-1 overflow-y-auto pr-2 md:grid-cols-2"
+                prop.children [
+                    for phaseSpaceFile in config.PhaseSpaceFiles |> List.sortBy _.Index do
+                        checkBoxRow
+                            (generate.SelectedPhaseSpaceFiles.Contains phaseSpaceFile.Index)
+                            $"ps{phaseSpaceFile.Index}"
+                            (fun () -> dispatch (TogglePhaseSpaceFile phaseSpaceFile.Index))
+                ]
             ]
         ]
     | _ -> Html.p "Loading phase-space files..."
@@ -203,7 +208,7 @@ let viewReview (generate: GenerateModel) =
         | NotStarted -> Html.p "No preview available."
         | Loading(Some preview) ->
             Html.pre [
-                prop.className "mt-2 max-h-72 overflow-auto rounded bg-slate-100 p-3 text-xs"
+                prop.className "mt-2 max-h-72 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
                 prop.text preview.StitchedPreviewText
             ]
         | Loading _ -> Html.p "Loading preview..."
@@ -215,7 +220,7 @@ let viewReview (generate: GenerateModel) =
                         prop.text $"Expected generated count: {preview.ExpectedGeneratedCount}"
                     ]
                     Html.pre [
-                        prop.className "mt-2 max-h-72 overflow-auto rounded bg-slate-100 p-3 text-xs"
+                        prop.className "mt-2 max-h-72 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
                         prop.text preview.StitchedPreviewText
                     ]
                 ]

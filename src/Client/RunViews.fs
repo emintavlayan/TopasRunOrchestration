@@ -3,7 +3,7 @@ module RunViews
 open Feliz
 open GenerateTypes
 open RunLogic
-open SharedWizardViews
+open WizardShell
 open SAFE
 
 /// Normalizes path separators for readable UI path rendering.
@@ -31,9 +31,9 @@ let makeRelativePath (appRoot: string option) (fullPath: string) =
 /// Returns classes for preflight status badge.
 let preflightStatusClass (ok: bool) =
     if ok then
-        "rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700"
+        "badge badge-success badge-sm"
     else
-        "rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700"
+        "badge badge-error badge-sm"
 
 /// Renders run welcome content.
 let viewRunWelcome () =
@@ -56,7 +56,7 @@ let viewSelectBatch (run: RunModel) (dispatch: Msg -> unit) =
             prop.className "overflow-x-auto"
             prop.children [
                 Html.table [
-                    prop.className "min-w-full border-collapse text-sm"
+                    prop.className "table table-zebra text-sm"
                     prop.children [
                         Html.thead [
                             Html.tr [
@@ -115,7 +115,7 @@ let viewPreflight (run: RunModel) =
             prop.className "space-y-3"
             prop.children [
                 Html.table [
-                    prop.className "min-w-full border-collapse text-sm"
+                    prop.className "table table-zebra text-sm"
                     prop.children [
                         Html.thead [
                             Html.tr [
@@ -155,7 +155,7 @@ let viewSlurmScript (appRoot: string option) (run: RunModel) =
             prop.className "space-y-4"
             prop.children [
                 Html.div [
-                    prop.className "grid gap-2 rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 md:grid-cols-2"
+                    prop.className "grid gap-2 rounded-box bg-base-200 p-3 text-sm md:grid-cols-2"
                     prop.children [
                         Html.p [ prop.text $"Seed base: {preview.SeedBase}" ]
                         Html.p [ prop.text $"Generated runs: {preview.RunCount}" ]
@@ -169,7 +169,7 @@ let viewSlurmScript (appRoot: string option) (run: RunModel) =
                     prop.className "overflow-x-auto"
                     prop.children [
                         Html.table [
-                            prop.className "min-w-full border-collapse text-xs"
+                            prop.className "table table-zebra text-xs"
                             prop.children [
                                 Html.thead [
                                     Html.tr [
@@ -199,7 +199,7 @@ let viewSlurmScript (appRoot: string option) (run: RunModel) =
                 ]
                 Html.h4 [ prop.className "font-semibold"; prop.text "Slurm script" ]
                 Html.pre [
-                    prop.className "max-h-80 overflow-auto rounded border border-slate-200 bg-slate-100 p-3 text-xs"
+                    prop.className "max-h-80 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
                     prop.text preview.ScriptText
                 ]
             ]
@@ -221,7 +221,7 @@ let viewRunResult (run: RunModel) =
                 Html.p [ prop.text $"Manifest path: {resultValue.ManifestPath}" ]
                 Html.p [ prop.text $"Script path: {resultValue.ScriptPath}" ]
                 Html.pre [
-                    prop.className "max-h-72 overflow-auto rounded border border-slate-200 bg-slate-100 p-3 text-xs"
+                    prop.className "max-h-72 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
                     prop.text resultValue.SbatchOutput
                 ]
             ]
@@ -230,7 +230,7 @@ let viewRunResult (run: RunModel) =
         match run.Error with
         | Some errorMessage ->
             Html.div [
-                prop.className "rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                prop.className "alert alert-error text-sm"
                 prop.text errorMessage
             ]
         | None -> Html.p "No run submission result yet."

@@ -3,15 +3,15 @@ module CollectViews
 open Feliz
 open GenerateTypes
 open CollectLogic
-open SharedWizardViews
+open WizardShell
 open SAFE
 
 /// Returns classes for collect preflight status badges.
 let collectStatusClass (ok: bool) =
     if ok then
-        "rounded-full bg-emerald-100 px-2 py-1 text-xs font-semibold text-emerald-700"
+        "badge badge-success badge-sm"
     else
-        "rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700"
+        "badge badge-error badge-sm"
 
 /// Renders collect welcome content.
 let viewCollectWelcome () =
@@ -35,7 +35,7 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
             prop.className "overflow-x-auto"
             prop.children [
                 Html.table [
-                    prop.className "min-w-full border-collapse text-sm"
+                    prop.className "table table-zebra text-sm"
                     prop.children [
                         Html.thead [
                             Html.tr [
@@ -104,7 +104,7 @@ let viewCollectPreflight (collect: CollectModel) =
                     ]
                 ]
                 Html.table [
-                    prop.className "min-w-full border-collapse text-sm"
+                    prop.className "table table-zebra text-sm"
                     prop.children [
                         Html.thead [
                             Html.tr [
@@ -193,7 +193,7 @@ let viewCollectResult (collect: CollectModel) =
         match collect.Error with
         | Some message ->
             Html.div [
-                prop.className "rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                prop.className "alert alert-error text-sm"
                 prop.text message
             ]
         | None -> Html.p "No collect result yet."

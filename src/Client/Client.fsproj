@@ -13,7 +13,7 @@
         <Compile Include="GenerateLogic.fs" />
         <Compile Include="RunLogic.fs" />
         <Compile Include="CollectLogic.fs" />
-        <Compile Include="SharedWizardViews.fs" />
+        <Compile Include="WizardShell.fs" />
         <Compile Include="GenerateViews.fs" />
         <Compile Include="RunViews.fs" />
         <Compile Include="CollectViews.fs" />
