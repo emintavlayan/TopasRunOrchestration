@@ -9,20 +9,27 @@ open CollectViews
 open Shared
 open SAFE
 
-/// Returns classes for top-level navigation buttons in selected/unselected state.
-let tabButtonClass (isSelected: bool) =
+/// Returns classes for top-level workflow navigation buttons.
+let topNavButtonClass (isSelected: bool) =
     if isSelected then
-        "tab tab-active font-semibold"
+        "btn btn-primary btn-sm md:btn-md normal-case gap-2 whitespace-nowrap"
     else
-        "tab font-medium text-base-content/70"
+        "btn btn-ghost btn-sm md:btn-md normal-case gap-2 whitespace-nowrap"
 
-/// Renders one top-level tab button.
-let tabButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
+/// Returns a small icon for each top-level workflow page.
+let pageIcon (page: Page) =
+    match page with
+    | Generate -> Html.span [ prop.className "text-base"; prop.text "⚙" ]
+    | Run -> Html.span [ prop.className "text-base"; prop.text "▶" ]
+    | Collect -> Html.span [ prop.className "text-base"; prop.text "📥" ]
+
+/// Renders one top-level navigation button.
+let topNavButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
     let isSelected = selectedPage = page
 
     Html.button [
-        prop.className (tabButtonClass isSelected)
-        prop.text (pageLabel page)
+        prop.className (topNavButtonClass isSelected)
+        prop.children [ pageIcon page; Html.span (pageLabel page) ]
         prop.onClick (fun _ -> dispatch (SelectPage page))
     ]
 
@@ -42,26 +49,27 @@ let viewPageContent (model: Model) (dispatch: Msg -> unit) =
 /// Renders the client landing page and selected content.
 let view (model: Model) (dispatch: Msg -> unit) =
     Html.main [
-        prop.className "min-h-screen bg-base-200 text-base-content"
+        prop.className "min-h-screen bg-base-300 text-base-content"
+        prop.custom ("data-theme", "light")
         prop.children [
             Html.section [
                 prop.className "mx-auto w-[96vw] max-w-[1600px] px-4 py-6"
                 prop.children [
-                    Html.h1 [ prop.className "text-3xl font-semibold"; prop.text "TopasRunOrchestration" ]
                     Html.div [
-                        prop.className "card mt-6 bg-base-100 shadow"
+                        prop.className "navbar mt-2 rounded-box border border-base-content/20 bg-base-100 px-4 shadow-md"
                         prop.children [
                             Html.div [
-                                prop.className "card-body p-3"
+                                prop.className "flex-1"
                                 prop.children [
-                                    Html.div [
-                                        prop.className "tabs tabs-boxed w-full bg-base-200 p-1"
-                                        prop.children [
-                                            tabButton model.SelectedPage Generate dispatch
-                                            tabButton model.SelectedPage Run dispatch
-                                            tabButton model.SelectedPage Collect dispatch
-                                        ]
-                                    ]
+                                    Html.h1 [ prop.className "text-lg font-semibold md:text-2xl"; prop.text "TopasRunOrchestration" ]
+                                ]
+                            ]
+                            Html.div [
+                                prop.className "flex flex-wrap items-center gap-2"
+                                prop.children [
+                                    topNavButton model.SelectedPage Generate dispatch
+                                    topNavButton model.SelectedPage Run dispatch
+                                    topNavButton model.SelectedPage Collect dispatch
                                 ]
                             ]
                         ]

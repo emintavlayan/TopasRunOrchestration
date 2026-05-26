@@ -102,7 +102,7 @@ let viewWizardShell
     (onPrimary: unit -> unit)
     =
     Html.div [
-        prop.className "card w-full bg-base-100 shadow"
+        prop.className "card w-full border border-base-content/20 bg-base-100 shadow-lg"
         prop.children [
             Html.div [
                 prop.className "card-body p-6"
@@ -110,14 +110,22 @@ let viewWizardShell
                     Html.div [
                         prop.className "flex gap-8"
                         prop.children [
-                            viewVerticalStepper currentStepIndex steps
+                            Html.div [
+                                prop.className "border-r border-base-content/15 pr-6"
+                                prop.children [ viewVerticalStepper currentStepIndex steps ]
+                            ]
 
                             Html.div [
                                 prop.className "flex min-h-[68vh] grow flex-col"
                                 prop.children [
                                     Html.div [
-                                        prop.className "grow overflow-y-auto pr-2"
-                                        prop.children [ content ]
+                                        prop.className "grow overflow-y-auto pr-2 pb-2"
+                                        prop.children [
+                                            Html.div [
+                                                prop.className "space-y-4 p-1 text-sm"
+                                                prop.children [ content ]
+                                            ]
+                                        ]
                                     ]
 
                                     match errorMessage with
@@ -129,7 +137,7 @@ let viewWizardShell
                                     | None -> Html.none
 
                                     Html.div [
-                                        prop.className "mt-6 flex items-center justify-between border-t border-base-300 pt-4"
+                                        prop.className "mt-6 flex items-center justify-between border-t border-base-content/15 pt-4"
                                         prop.children [
                                             Html.button [
                                                 prop.className cancelButtonClass
