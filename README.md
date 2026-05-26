@@ -24,6 +24,12 @@ The app runs as a server with browser-based UI clients.
 - Client owns wizard UI state and API calls.
 - Shared project owns DTOs and API contracts.
 
+## UI model
+
+- Client UI is styled with Tailwind CSS + daisyUI.
+- Generate, Run, and Collect use a shared vertical wizard shell in `src/Client/WizardShell.fs`.
+- The UI uses CSS-only components (no JavaScript UI library wrappers).
+
 ## AppRoot folder structure
 
 The app is driven by one configured root path (`Tsebt:AppRoot`).
