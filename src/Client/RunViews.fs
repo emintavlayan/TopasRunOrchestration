@@ -280,11 +280,11 @@ let viewRunWizardNavigation (run: RunModel) (dispatch: Msg -> unit) =
 let viewRunPage (appRoot: string option) (run: RunModel) (dispatch: Msg -> unit) =
     let steps =
         [
-            { Label = "Welcome"; Hint = "Review what Run submits to Slurm for this batch." }
+            { Label = "Welcome"; Hint = "Run submits an already generated batch to Slurm." }
             { Label = "Batch"; Hint = "Select one generated batch that is ready to submit." }
             { Label = "Preflight"; Hint = "Verify required files and collision checks before submit." }
             { Label = "Script"; Hint = "Review manifest rows and Slurm script content." }
-            { Label = "Result"; Hint = "Confirm submission result and Slurm job details." }
+            { Label = "Result"; Hint = "Review Slurm submission result." }
         ]
     let currentStepIndex = run.Step |> function | RunWelcome -> 0 | SelectBatch -> 1 | PreflightReview -> 2 | SlurmScriptReview -> 3 | RunResult -> 4
 

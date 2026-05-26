@@ -20,40 +20,50 @@ let outlinedButtonClass =
 let primaryButtonClass =
     "rounded bg-blue-700 px-4 py-2 text-white transition hover:bg-blue-800 disabled:opacity-40"
 
-/// Renders a linear numeric stepper with active and completed states.
+/// Renders a linear dot stepper with active and completed states.
 let viewLinearStepper (currentStepIndex: int) (steps: StepperItem list) =
     Html.div [
         prop.className "mb-6"
         prop.children [
             Html.div [
-                prop.className "flex items-start"
+                prop.className "flex w-full items-start"
                 prop.children [
                     for index, step in steps |> List.indexed do
                         let isActive = index = currentStepIndex
                         let isCompleted = index < currentStepIndex
-                        let circleClass =
+                        let dotClass =
                             if isActive || isCompleted then
-                                "flex h-8 w-8 items-center justify-center rounded-full bg-blue-700 text-sm font-semibold text-white"
+                                "h-4 w-4 rounded-full bg-blue-700 ring-2 ring-blue-100"
                             else
-                                "flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-600"
+                                "h-4 w-4 rounded-full bg-slate-300"
                         let lineClass =
                             if isCompleted then
-                                "mt-4 h-0.5 flex-1 bg-blue-700"
+                                "h-0.5 flex-1 bg-blue-700"
                             else
-                                "mt-4 h-0.5 flex-1 bg-slate-200"
+                                "h-0.5 flex-1 bg-slate-200"
+                        let labelClass =
+                            if isActive then
+                                "mt-2 text-xs font-semibold text-blue-700"
+                            elif isCompleted then
+                                "mt-2 text-xs font-medium text-slate-700"
+                            else
+                                "mt-2 text-xs font-medium text-slate-500"
 
                         Html.div [
                             prop.className "flex flex-1 items-start"
                             prop.children [
                                 Html.div [
-                                    prop.className "min-w-0"
+                                    prop.className "flex min-w-0 flex-col items-center"
                                     prop.children [
-                                        Html.div [ prop.className circleClass; prop.text $"{index + 1}" ]
-                                        Html.p [ prop.className "mt-2 text-xs font-medium text-slate-700"; prop.text step.Label ]
+                                        Html.div [ prop.className dotClass ]
+                                        Html.p [ prop.className labelClass; prop.text step.Label ]
                                     ]
                                 ]
                                 if index < steps.Length - 1 then
-                                    Html.div [ prop.className lineClass ]
+                                    Html.div [
+                                        prop.className "mt-2 flex flex-1 items-center px-2"
+                                        prop.children [ Html.div [ prop.className lineClass ] ]
+                                    ]
                             ]
                         ]
                 ]
