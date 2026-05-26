@@ -35,24 +35,6 @@ let preflightStatusClass (ok: bool) =
     else
         "rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700"
 
-/// Renders run wizard step labels.
-let runStepLabel (step: RunStep) =
-    match step with
-    | RunWelcome -> "Welcome"
-    | SelectBatch -> "Select batch"
-    | PreflightReview -> "Preflight"
-    | SlurmScriptReview -> "Slurm script"
-    | RunResult -> "Result"
-
-/// Renders run wizard step content title.
-let runStepTitle (step: RunStep) =
-    match step with
-    | RunWelcome -> "Run Wizard: Welcome"
-    | SelectBatch -> "Run Wizard: Select Batch"
-    | PreflightReview -> "Run Wizard: Preflight Review"
-    | SlurmScriptReview -> "Run Wizard: Slurm Script Review"
-    | RunResult -> "Run Wizard: Result"
-
 /// Renders run welcome content.
 let viewRunWelcome () =
     Html.div [
@@ -296,10 +278,19 @@ let viewRunWizardNavigation (run: RunModel) (dispatch: Msg -> unit) =
 
 /// Renders full run wizard.
 let viewRunPage (appRoot: string option) (run: RunModel) (dispatch: Msg -> unit) =
+    let steps =
+        [
+            { Label = "Welcome"; Hint = "Review what Run submits to Slurm for this batch." }
+            { Label = "Batch"; Hint = "Select one generated batch that is ready to submit." }
+            { Label = "Preflight"; Hint = "Verify required files and collision checks before submit." }
+            { Label = "Script"; Hint = "Review manifest rows and Slurm script content." }
+            { Label = "Result"; Hint = "Confirm submission result and Slurm job details." }
+        ]
+    let currentStepIndex = run.Step |> function | RunWelcome -> 0 | SelectBatch -> 1 | PreflightReview -> 2 | SlurmScriptReview -> 3 | RunResult -> 4
+
     Html.div [
         prop.children [
-            Html.h2 [ prop.className "text-xl font-semibold"; prop.text (runStepTitle run.Step) ]
-            Html.p [ prop.className "mt-1 text-sm text-slate-600"; prop.text $"Current step: {runStepLabel run.Step}" ]
+            viewLinearStepper currentStepIndex steps
             Html.div [ prop.className "mt-4"; prop.children [ viewRunStep appRoot run dispatch ] ]
             match run.Error with
             | Some errorMessage ->

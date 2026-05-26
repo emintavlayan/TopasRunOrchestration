@@ -13,15 +13,6 @@ let collectStatusClass (ok: bool) =
     else
         "rounded-full bg-red-100 px-2 py-1 text-xs font-semibold text-red-700"
 
-/// Returns collect wizard title by step.
-let collectStepTitle (step: CollectStep) =
-    match step with
-    | CollectWelcome -> "Collect Wizard: Welcome"
-    | CollectSelectBatch -> "Collect Wizard: Select Batch"
-    | CollectPreflightReview -> "Collect Wizard: Output Preflight"
-    | CollectMergeReview -> "Collect Wizard: Merge Review"
-    | CollectResult -> "Collect Wizard: Result"
-
 /// Renders collect welcome content.
 let viewCollectWelcome () =
     Html.div [
@@ -250,9 +241,19 @@ let viewCollectNavigation (collect: CollectModel) (dispatch: Msg -> unit) =
 
 /// Renders full collect wizard page.
 let viewCollectPage (collect: CollectModel) (dispatch: Msg -> unit) =
+    let steps =
+        [
+            { Label = "Welcome"; Hint = "Review how Collect reads and merges run output files." }
+            { Label = "Batch"; Hint = "Choose the batch to collect from shared run outputs." }
+            { Label = "Preflight"; Hint = "Check CSV/log availability and missing files before collect." }
+            { Label = "Merge"; Hint = "Review planned merged files and summary output paths." }
+            { Label = "Result"; Hint = "Inspect collect completion details and generated outputs." }
+        ]
+    let currentStepIndex = collect.Step |> function | CollectWelcome -> 0 | CollectSelectBatch -> 1 | CollectPreflightReview -> 2 | CollectMergeReview -> 3 | CollectResult -> 4
+
     Html.div [
         prop.children [
-            Html.h2 [ prop.className "text-xl font-semibold"; prop.text (collectStepTitle collect.Step) ]
+            viewLinearStepper currentStepIndex steps
             Html.div [ prop.className "mt-4"; prop.children [ viewCollectStep collect dispatch ] ]
             match collect.Error with
             | Some message ->

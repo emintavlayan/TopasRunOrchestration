@@ -6,6 +6,9 @@ open GenerateTypes
 open SAFE
 open Shared
 
+/// Represents one linear stepper item with label and helper text.
+type StepperItem = { Label: string; Hint: string }
+
 /// Returns base classes for text-style action buttons.
 let textButtonClass = "rounded px-3 py-2 text-slate-700 transition hover:bg-slate-100"
 
@@ -16,6 +19,51 @@ let outlinedButtonClass =
 /// Returns base classes for primary call-to-action buttons.
 let primaryButtonClass =
     "rounded bg-blue-700 px-4 py-2 text-white transition hover:bg-blue-800 disabled:opacity-40"
+
+/// Renders a linear numeric stepper with active and completed states.
+let viewLinearStepper (currentStepIndex: int) (steps: StepperItem list) =
+    Html.div [
+        prop.className "mb-6"
+        prop.children [
+            Html.div [
+                prop.className "flex items-start"
+                prop.children [
+                    for index, step in steps |> List.indexed do
+                        let isActive = index = currentStepIndex
+                        let isCompleted = index < currentStepIndex
+                        let circleClass =
+                            if isActive || isCompleted then
+                                "flex h-8 w-8 items-center justify-center rounded-full bg-blue-700 text-sm font-semibold text-white"
+                            else
+                                "flex h-8 w-8 items-center justify-center rounded-full bg-slate-200 text-sm font-semibold text-slate-600"
+                        let lineClass =
+                            if isCompleted then
+                                "mt-4 h-0.5 flex-1 bg-blue-700"
+                            else
+                                "mt-4 h-0.5 flex-1 bg-slate-200"
+
+                        Html.div [
+                            prop.className "flex flex-1 items-start"
+                            prop.children [
+                                Html.div [
+                                    prop.className "min-w-0"
+                                    prop.children [
+                                        Html.div [ prop.className circleClass; prop.text $"{index + 1}" ]
+                                        Html.p [ prop.className "mt-2 text-xs font-medium text-slate-700"; prop.text step.Label ]
+                                    ]
+                                ]
+                                if index < steps.Length - 1 then
+                                    Html.div [ prop.className lineClass ]
+                            ]
+                        ]
+                ]
+            ]
+            Html.p [
+                prop.className "mt-3 text-sm text-slate-600"
+                prop.text steps[currentStepIndex].Hint
+            ]
+        ]
+    ]
 
 /// Groups template files by configured folder group.
 let groupTemplateFiles (files: TemplateFileInfo list) : (string * TemplateFileInfo list) list =
@@ -303,11 +351,19 @@ let viewWizardNavigation (generate: GenerateModel) (dispatch: Msg -> unit) =
 
 /// Renders the Generate page with wizard state.
 let viewGeneratePage (generate: GenerateModel) (dispatch: Msg -> unit) =
-    Html.div [
-        Html.h2 [
-            prop.className "text-xl font-semibold"
-            prop.text $"Generate Wizard: {stepLabel generate.Step}"
+    let steps =
+        [
+            { Label = "Welcome"; Hint = "Review what Generate will produce for this batch." }
+            { Label = "Components"; Hint = "Choose which TOPAS template components to include." }
+            { Label = "Nodes"; Hint = "Select the configured nodes to generate runs for." }
+            { Label = "Phase-space"; Hint = "Select the phase-space files to combine with nodes." }
+            { Label = "Review"; Hint = "Confirm selections and preview stitched input content." }
+            { Label = "Result"; Hint = "Inspect generated files and run metadata." }
         ]
+    let currentStepIndex = generate.Step |> function | Welcome -> 0 | SelectComponents -> 1 | SelectNodes -> 2 | SelectPhaseSpaceFiles -> 3 | Review -> 4 | Result -> 5
+
+    Html.div [
+        viewLinearStepper currentStepIndex steps
         Html.div [ prop.className "mt-4"; prop.children [ viewGenerateStep generate dispatch ] ]
         match generate.Error with
         | Some errorMessage -> Html.p [ prop.className "mt-3 text-sm text-red-700"; prop.text errorMessage ]
