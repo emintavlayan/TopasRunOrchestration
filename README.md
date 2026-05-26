@@ -180,7 +180,10 @@ dotnet test Application.sln
 
 ## Testing coverage
 
-Automated tests currently cover:
+Automated tests are xUnit-based and run with `dotnet test Application.sln`.
+They use temporary folders plus fake CSV/process output fixtures, and do not require TOPAS or Slurm.
+
+Coverage currently includes:
 
 - configuration validation and bootstrap folder creation
 - generate planning, placeholder replacement, filesystem generation, and collision protection
