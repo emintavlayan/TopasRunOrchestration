@@ -2,21 +2,22 @@
 
 This checklist tracks practical behavioral coverage for implemented server workflows using the xUnit suite in `tests/Server.Tests`.
 
-| Workflow area | Status | Test location |
+| Workflow area | Status | Test files |
 |---|---|---|
-| Config validation | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Bootstrap folders | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Generate planning | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Generate collision checks | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Generate filesystem operation | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Run manifest and script planning | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Run submission guards | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Collect preflight | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Collect CSV merge | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Collect statistics | Covered | `tests/Server.Tests/Server.Tests.fs` |
-| Collect operation | Covered | `tests/Server.Tests/Server.Tests.fs` |
+| Config validation | Covered | `ConfigTests.fs` |
+| Bootstrap folders | Covered | `ConfigTests.fs` |
+| Generate planning | Covered | `GenerateTests.fs` |
+| Generate collision checks | Covered | `GenerateTests.fs` |
+| Generate filesystem operation | Covered | `GenerateTests.fs` |
+| Run manifest and script planning | Covered | `RunTests.fs` |
+| Run submission guards | Covered | `RunTests.fs` |
+| Collect preflight | Covered | `CollectTests.fs` |
+| Collect CSV merge | Covered | `CollectTests.fs` |
+| Collect statistics | Covered | `CollectTests.fs` |
+| Collect operation | Covered | `CollectTests.fs` |
 
 Notes:
+
 - This is workflow-level behavioral coverage, not line/branch coverage.
-- Tests use temporary folders, fake CSV data, and fake sbatch output parsing paths.
+- Tests use temporary folders and fake CSV/process output fixtures.
 - Real Slurm execution and real TOPAS execution remain manual smoke-test responsibilities.

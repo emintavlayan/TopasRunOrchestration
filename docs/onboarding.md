@@ -1,0 +1,55 @@
+# Onboarding Guide
+
+## 1. Prerequisites
+
+- .NET 8 SDK
+- Node.js (for client development tooling)
+- Access to a writable `AppRoot` location
+
+Optional for full Run workflow:
+
+- Slurm (`sbatch`, `srun`) available on host
+- TOPAS executable available on host
+
+## 2. First local setup
+
+1. Open `src/Server/appsettings.Development.json`.
+2. Set `Tsebt:AppRoot` to a local writable folder.
+3. Verify paths under `Tsebt:Paths`.
+4. Verify node names/digits and phase-space entries.
+
+## 3. Run the app
+
+```powershell
+dotnet run --project .\src\Server
+```
+
+Then open the client URL shown by the server.
+
+## 4. Expected workflow
+
+1. Generate: create one batch (`seedBase`) and input files.
+2. Run: preflight, preview Slurm script, submit with `sbatch`.
+3. Collect: preflight outputs, merge CSVs, compute summary statistics.
+
+## 5. Key runtime folders
+
+```text
+inputs/{seedBase}   generated TOPAS input files
+runs/{seedBase}     manifest/script and TOPAS CSV/log outputs
+outputs/{seedBase}  merged files + dose summary
+```
+
+## 6. Test before changes
+
+```powershell
+dotnet test Application.sln --logger "console;verbosity=normal"
+```
+
+## 7. Where to read next
+
+- App overview: `docs/app-behaviour-spec.md`
+- Generate details: `docs/generate-behaviour-spec.md`
+- Run details: `docs/run-behaviour-spec.md`
+- Collect details: `docs/collect-behaviour-spec.md`
+- Test scope: `docs/test-coverage.md`

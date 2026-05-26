@@ -1,69 +1,63 @@
 # App Behaviour Specification
 
-## Runtime model
+## Architecture
 
-- The app is a SAFE Light F# web app.
-- `Server` owns configuration, file system access, SQLite, and orchestration.
-- `Client` owns Elmish state and UI flow.
-- `Shared` defines API contracts and DTOs.
+The application follows SAFE Light separation:
 
-## General settings
+- `Shared`: DTOs and API contracts
+- `Server`: filesystem/SQLite/process orchestration
+- `Client`: wizard UI state and flow
 
-- App uses SQLite as local persistent runtime memory.
-- SQLite stores generated batch/run metadata and statuses.
-- Large simulation files remain on disk; database stores references.
-- On startup, server creates required folders and initializes SQLite schema if missing.
-- App configuration is file/environment based, not edited through the web UI.
-- Windows is the development environment.
-- Ubuntu 24.04 is the target runtime host.
-- Deployment target is a published app folder copied to Linux, then optionally managed by systemd.
+## Implemented workflows
 
-## Current implemented feature set
+- Generate workflow (preview + execution + metadata persistence)
+- Run workflow (batch list, preflight, Slurm script preview, submit)
+- Collect workflow (preflight, CSV merge, statistics, metadata update)
 
-- Generate wizard end-to-end.
-- Generate preview with real placeholder replacement.
-- Real Generate file output.
-- SQLite metadata persistence for generated batches and runs.
-- SQLite-driven next seed base progression.
-- Collision-safe Generate preflight validation before any write/insert.
-- Run wizard, preflight, Slurm script preview, and submission.
-- Collect wizard, preflight, CSV merge, and dose summary statistics.
+## Persistent model
 
-## Not implemented
+SQLite stores orchestration metadata (not large simulation files):
 
-- Full history UI.
+- generated batch metadata
+- generated run metadata
+- run submission metadata
+- collect metadata and output pointers
+
+Files remain on disk under `AppRoot`.
 
 ## Folder model
 
-- AppRoot is configured in `appsettings`.
-- Generated TOPAS inputs are written to `inputs/{seedBase}/`.
-- TOPAS run outputs are expected directly in shared `runs/{seedBase}/`.
-- Collect outputs are written to `outputs/{seedBase}/`.
-- Phase-space files are not copied/managed by this app; TOPAS configuration defines their source paths.
+```text
+templates/   TOPAS source fragments/components
+inputs/      generated TOPAS inputs per seed base
+runs/        run artifacts and TOPAS CSV/log outputs
+outputs/     collect output files
+database/    SQLite database
+logs/        application logs
+```
 
-## Run model
+## Batch identity model
 
-- Run reads generated batch metadata from SQLite.
-- Run writes `runs/{seedBase}/run_manifest.tsv` and `runs/{seedBase}/run_batch.slurm`.
-- Manifest rows include task id, node name, run id, input path, and log path.
-- Slurm execution uses node assignment from manifest:
-  - `srun --nodes=1 --ntasks=1 --nodelist="$NODE_NAME" "$TOPAS" "$INPUT_FILE" > "$LOG_FILE" 2>&1`
-- Node names come from `appsettings` nodes.
-- Run prevents double-submit and stores Slurm job metadata back to SQLite.
+- `seedBase` is the batch id.
+- `RunId` format: `seed{seed}_phsp{phaseSpaceIndex}`.
+- Seed format: `seedBase + nodeDigit`.
 
-## UI path display
+## Safety model
 
-- Server data remains full absolute paths.
-- Client UI may show paths relative to AppRoot for readability.
+Generate and Run perform preflight/collision checks before committing state.
 
-## Generate safety contract
+- Generate is all-or-nothing on collision failures.
+- Run blocks double-submit and preflight failures.
+- Collect blocks when required CSV inputs are missing.
 
-Before Generate writes any files or inserts any metadata, the server validates:
+## Runtime assumptions
 
-- input seed folder collision
-- generated input file collisions
-- run folder collisions
-- duplicate run id collisions in SQLite
+- Dev host is typically Windows.
+- Target runtime is Linux (cluster/server).
+- Slurm/TOPAS availability is host-dependent and not required for unit tests.
 
-If any check fails, Generate returns `Error` and performs no file write or metadata insert.
+## Not implemented
 
+- History/batch-browser UI remains minimal.
+- No collect overwrite/recollect flow in first version.
+- No run rerun/overwrite in first version.

@@ -1,162 +1,95 @@
 # TopasRunOrchestration
 
-TopasRunOrchestration is a SAFE Stack F# web application for preparing and managing TOPAS Monte Carlo simulation batches for TSEBT workflows.
+TopasRunOrchestration is a SAFE Stack F# web application that prepares, submits, and collects TOPAS Monte Carlo simulation batches for TSEBT workflows.
 
-The app is intended to run on a central Linux machine on the treatment-planning or compute network. Users access it through a browser. The server reads local configuration, lists available TOPAS component files, generates stitched TOPAS input files, and records generation metadata in SQLite.
+## What it does
 
-## Current status
+The application currently supports three end-to-end workflows:
 
-Implemented:
+1. Generate
+2. Run
+3. Collect
 
-- SAFE Stack application skeleton.
-- App configuration from `appsettings.json` / `appsettings.Development.json`.
-- Local root bootstrap for required folders.
-- SQLite initialization.
-- SQLite-backed seed-base progression.
-- Recursive TOPAS component listing from `templates/`.
-- Generate wizard UI.
-- Generate preview.
-- Real generation of stitched TOPAS input files.
-- SQLite metadata insertion for generated batches and runs.
-- Collision-safe Generate preflight (input folder, generated input files, run folders, duplicate run IDs).
-- Run wizard UI.
-- Run preflight, Slurm script preview, and `sbatch` submission.
-- Collect wizard UI.
-- Collect preflight and preview.
-- Per-phase-space node CSV merge.
-- Final dose summary statistics (mean, median, standard deviation, count).
-- Collect operation with SQLite metadata updates.
-- Automated tests across config, generate, run, and collect workflows.
+At a high level:
 
-Not implemented yet:
+- `Generate` builds TOPAS input files from selected templates, nodes, and phase-space files.
+- `Run` prepares Slurm manifest/script files and submits the batch with `sbatch`.
+- `Collect` reads TOPAS CSV/log outputs, merges node outputs per phase-space, and computes final dose statistics.
 
-- History / batch browser UI.
-- Production systemd service setup.
+## Runtime model
 
-## Runtime root folder
+The app runs as a server with browser-based UI clients.
 
-The app is driven by one configured root folder:
+- Server owns file system, SQLite, and orchestration logic.
+- Client owns wizard UI state and API calls.
+- Shared project owns DTOs and API contracts.
 
-```text
-AppRoot
-```
+## AppRoot folder structure
 
-Development example:
-
-```text
-C:\Dev\tsebt-local-root
-```
-
-Production example:
-
-```text
-/srv/cluster/tsebt
-```
-
-Expected folders under `AppRoot`:
+The app is driven by one configured root path (`Tsebt:AppRoot`).
 
 ```text
 templates/   TOPAS source template/component files
 inputs/      generated TOPAS input files at inputs/{seedBase}/
-runs/        shared run/output folder at runs/{seedBase}/ (TOPAS CSV/log files are written here)
-outputs/     collect outputs per seed base (merged csv + dose summary)
+runs/        run artifacts and TOPAS run outputs at runs/{seedBase}/
+outputs/     collect outputs at outputs/{seedBase}/
 database/    SQLite database
 logs/        application/runtime logs
 ```
 
 Notes:
 
-- Phase-space files are not copied or managed by the app; TOPAS input configuration controls where phsp data is read from.
-- Collect reads directly from the shared `runs/{seedBase}` folder; no node copy-back flow is required in the current model.
+- Phase-space files are not copied or managed by this app.
+- Collect reads from shared `runs/{seedBase}` in the current model.
 
 ## Generate summary
 
-Generate creates TOPAS input files for one simulation batch from:
+- Seed rule: `seed = seedBase + nodeDigit`
+- RunId rule: `seed{seed}_phsp{phaseSpaceIndex}`
+- Generated input file: `seed{seed}_phsp{phaseSpaceIndex}.txt`
+- Output placeholder target: `{AppRoot}/runs/{seedBase}/{runId}`
 
-```text
-selected TOPAS component files
-selected nodes
-selected phase-space files
-configured placeholders
-runtime seed base
-```
-
-Seed rule:
-
-```text
-seed = seedBase + nodeDigit
-```
-
-RunId rule:
-
-```text
-seed{seed}_phsp{phaseSpaceIndex}
-```
-
-Generated filename rule:
-
-```text
-seed{seed}_phsp{phaseSpaceIndex}.txt
-```
-
-Output placeholder value:
-
-```text
-{AppRoot}/runs/{seedBase}/{runId}
-```
-
-## Generate safety
-
-Generate validates all planned targets before writing files or inserting SQLite metadata.
-
-Preflight checks:
-
-- input seed folder already contains files -> error
-- any planned generated input file already exists -> error
-- run seed folder already contains files -> error
-- any planned output base path already exists (`path`, `path.csv`, `path.log`) -> error
-- any planned run ID already exists in SQLite -> error
-
-All-or-nothing behavior:
-
-- on any collision error, no files are written and no SQLite rows are inserted.
+Generate is collision-safe and all-or-nothing.
 
 ## Run summary
 
-Run submits one generated batch (`seedBase`) using SQLite batch metadata.
-
-Run writes:
+- Runs against one generated batch (`seedBase`).
+- Writes:
 
 ```text
 runs/{seedBase}/run_manifest.tsv
 runs/{seedBase}/run_batch.slurm
 ```
 
-Manifest columns:
+- Manifest columns:
+  - task id
+  - node name
+  - run id
+  - input file path
+  - log file path
 
-- task id
-- node name
-- run id
-- input file path
-- log file path
-
-Slurm script execution line:
+- Slurm execution line:
 
 ```bash
 srun --nodes=1 --ntasks=1 --nodelist="$NODE_NAME" "$TOPAS" "$INPUT_FILE" > "$LOG_FILE" 2>&1
 ```
 
-Run behavior notes:
+- Double-submit is blocked when already submitted.
 
-- node names come from `appsettings` node configuration
-- partition/topas executable/cpus-per-task come from configuration
-- double-submit is blocked when a batch is already submitted
-- Slurm submission metadata is written back to SQLite
+## Collect summary
 
-UI display rule:
+- Preflight checks expected CSV/log files for a selected `seedBase`.
+- Missing CSV blocks collect.
+- Missing log is warning-only in current behavior.
+- Produces:
 
-- server stores full absolute paths
-- Run UI may display AppRoot-relative paths for readability
+```text
+outputs/{seedBase}/collect_manifest.tsv
+outputs/{seedBase}/phsp{phaseSpaceIndex}_merged.csv
+outputs/{seedBase}/dose_summary.csv
+```
+
+- Final summary includes `mean`, `median`, `standard_deviation`, `count`.
 
 ## Build, run, test
 
@@ -166,41 +99,52 @@ Build:
 dotnet build Application.sln
 ```
 
-Run:
+Run server:
 
 ```powershell
 dotnet run --project .\src\Server
 ```
 
-Test:
+Run tests:
 
 ```powershell
 dotnet test Application.sln
 ```
 
-## Testing coverage
+## Testing
 
-Automated tests are xUnit-based and run with `dotnet test Application.sln`.
-They use temporary folders plus fake CSV/process output fixtures, and do not require TOPAS or Slurm.
+Server tests are xUnit-based and run via `dotnet test Application.sln`.
 
-Coverage currently includes:
+Automated tests:
 
-- configuration validation and bootstrap folder creation
-- generate planning, placeholder replacement, filesystem generation, and collision protection
-- run manifest/script/job-id parsing logic and preflight/double-submit guards (without real Slurm)
-- collect preflight, CSV merge/statistics, and full collect operation with fake CSV/log data
+- do not require TOPAS
+- do not require Slurm
+- use temporary folders and fake CSV/process output fixtures
 
-Manual verification is still required for:
+Manual smoke testing is still required for:
 
-- real `sbatch` submission and cluster behavior
-- real TOPAS execution
-- clinical review of real TOPAS CSV outputs and dose interpretation
+- real Slurm scheduling behavior
+- real TOPAS execution runtime behavior
+- clinical interpretation of real dose outputs
 
-## Documentation
+## Documentation map
 
-See:
+Start here for onboarding:
+
+- `docs/onboarding.md`
+
+Behavior specifications:
 
 - `docs/app-behaviour-spec.md`
 - `docs/generate-behaviour-spec.md`
+- `docs/run-behaviour-spec.md`
 - `docs/collect-behaviour-spec.md`
+
+UX and engineering style:
+
 - `docs/generate-wizard-ux-spec.md`
+- `docs/safe-light-fsharp-doctrine.md`
+
+Testing:
+
+- `docs/test-coverage.md`
