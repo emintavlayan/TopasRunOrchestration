@@ -3,8 +3,8 @@ module RunViews
 open Feliz
 open GenerateTypes
 open RunLogic
+open SharedWizardViews
 open SAFE
-open GenerateViews
 
 /// Normalizes path separators for readable UI path rendering.
 let private normalizePathForDisplay (pathValue: string) =
@@ -244,61 +244,35 @@ let viewRunStep (appRoot: string option) (run: RunModel) (dispatch: Msg -> unit)
     | SlurmScriptReview -> viewSlurmScript appRoot run
     | RunResult -> viewRunResult run
 
-/// Renders run wizard navigation controls.
-let viewRunWizardNavigation (run: RunModel) (dispatch: Msg -> unit) =
-    Html.div [
-        prop.className "mt-6 flex justify-end"
-        prop.children [
-            Html.div [
-                prop.className "flex gap-2"
-                prop.children [
-                    Html.button [
-                        prop.className textButtonClass
-                        prop.text "Cancel"
-                        prop.onClick (fun _ -> dispatch CancelRunWizard)
-                    ]
-
-                    if showPreviousRunButton run.Step then
-                        Html.button [
-                            prop.className outlinedButtonClass
-                            prop.text "Previous"
-                            prop.onClick (fun _ -> dispatch PreviousRunStep)
-                        ]
-
-                    Html.button [
-                        prop.className primaryButtonClass
-                        prop.disabled (disableRunPrimaryButton run)
-                        prop.text (runPrimaryButtonText run.Step)
-                        prop.onClick (fun _ -> dispatch NextRunStep)
-                    ]
-                ]
-            ]
-        ]
-    ]
-
 /// Renders full run wizard.
 let viewRunPage (appRoot: string option) (run: RunModel) (dispatch: Msg -> unit) =
     let steps =
         [
-            { Label = "Welcome"; Hint = "Run submits an already generated batch to Slurm." }
-            { Label = "Batch"; Hint = "Select one generated batch that is ready to submit." }
-            { Label = "Preflight"; Hint = "Verify required files and collision checks before submit." }
-            { Label = "Script"; Hint = "Review manifest rows and Slurm script content." }
-            { Label = "Result"; Hint = "Review Slurm submission result." }
+            { Title = "Welcome"; Instruction = "Review what Run submits to Slurm." }
+            { Title = "Batch"; Instruction = "Select a generated batch." }
+            { Title = "Preflight"; Instruction = "Verify files and collision checks." }
+            { Title = "Script"; Instruction = "Review manifest rows and Slurm script." }
+            { Title = "Result"; Instruction = "Review Slurm submission result." }
         ]
-    let currentStepIndex = run.Step |> function | RunWelcome -> 0 | SelectBatch -> 1 | PreflightReview -> 2 | SlurmScriptReview -> 3 | RunResult -> 4
+    let currentStepIndex =
+        run.Step
+        |> function
+            | RunWelcome -> 0
+            | SelectBatch -> 1
+            | PreflightReview -> 2
+            | SlurmScriptReview -> 3
+            | RunResult -> 4
+    let isFinalAction = run.Step = SlurmScriptReview || run.Step = RunResult
 
-    Html.div [
-        prop.children [
-            viewLinearStepper currentStepIndex steps
-            Html.div [ prop.className "mt-4"; prop.children [ viewRunStep appRoot run dispatch ] ]
-            match run.Error with
-            | Some errorMessage ->
-                Html.div [
-                    prop.className "mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-                    prop.text errorMessage
-                ]
-            | None -> Html.none
-            viewRunWizardNavigation run dispatch
-        ]
-    ]
+    viewWizardShell
+        steps
+        currentStepIndex
+        (viewRunStep appRoot run dispatch)
+        run.Error
+        (showPreviousRunButton run.Step)
+        (runPrimaryButtonText run.Step)
+        (disableRunPrimaryButton run)
+        (not isFinalAction)
+        (fun () -> dispatch CancelRunWizard)
+        (fun () -> dispatch PreviousRunStep)
+        (fun () -> dispatch NextRunStep)

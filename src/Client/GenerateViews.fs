@@ -3,77 +3,9 @@ module GenerateViews
 open Feliz
 open GenerateLogic
 open GenerateTypes
+open SharedWizardViews
 open SAFE
 open Shared
-
-/// Represents one linear stepper item with label and helper text.
-type StepperItem = { Label: string; Hint: string }
-
-/// Returns base classes for text-style action buttons.
-let textButtonClass = "rounded px-3 py-2 text-slate-700 transition hover:bg-slate-100"
-
-/// Returns base classes for outlined secondary action buttons.
-let outlinedButtonClass =
-    "rounded border border-slate-300 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-50"
-
-/// Returns base classes for primary call-to-action buttons.
-let primaryButtonClass =
-    "rounded bg-blue-700 px-4 py-2 text-white transition hover:bg-blue-800 disabled:opacity-40"
-
-/// Renders a linear dot stepper with active and completed states.
-let viewLinearStepper (currentStepIndex: int) (steps: StepperItem list) =
-    Html.div [
-        prop.className "mb-6"
-        prop.children [
-            Html.div [
-                prop.className "flex w-full items-start"
-                prop.children [
-                    for index, step in steps |> List.indexed do
-                        let isActive = index = currentStepIndex
-                        let isCompleted = index < currentStepIndex
-                        let dotClass =
-                            if isActive || isCompleted then
-                                "h-4 w-4 rounded-full bg-blue-700 ring-2 ring-blue-100"
-                            else
-                                "h-4 w-4 rounded-full bg-slate-300"
-                        let lineClass =
-                            if isCompleted then
-                                "h-0.5 flex-1 bg-blue-700"
-                            else
-                                "h-0.5 flex-1 bg-slate-200"
-                        let labelClass =
-                            if isActive then
-                                "mt-2 text-xs font-semibold text-blue-700"
-                            elif isCompleted then
-                                "mt-2 text-xs font-medium text-slate-700"
-                            else
-                                "mt-2 text-xs font-medium text-slate-500"
-
-                        Html.div [
-                            prop.className "flex flex-1 items-start"
-                            prop.children [
-                                Html.div [
-                                    prop.className "flex min-w-0 flex-col items-center"
-                                    prop.children [
-                                        Html.div [ prop.className dotClass ]
-                                        Html.p [ prop.className labelClass; prop.text step.Label ]
-                                    ]
-                                ]
-                                if index < steps.Length - 1 then
-                                    Html.div [
-                                        prop.className "mt-2 flex flex-1 items-center px-2"
-                                        prop.children [ Html.div [ prop.className lineClass ] ]
-                                    ]
-                            ]
-                        ]
-                ]
-            ]
-            Html.p [
-                prop.className "mt-3 text-sm text-slate-600"
-                prop.text steps[currentStepIndex].Hint
-            ]
-        ]
-    ]
 
 /// Groups template files by configured folder group.
 let groupTemplateFiles (files: TemplateFileInfo list) : (string * TemplateFileInfo list) list =
@@ -161,12 +93,12 @@ let viewNodes (generate: GenerateModel) (dispatch: Msg -> unit) =
                 prop.className "mb-3 flex gap-2"
                 prop.children [
                     Html.button [
-                        prop.className outlinedButtonClass
+                        prop.className secondaryButtonClass
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllNodes)
                     ]
                     Html.button [
-                        prop.className outlinedButtonClass
+                        prop.className secondaryButtonClass
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoNodes)
                     ]
@@ -189,12 +121,12 @@ let viewPhaseSpaceFiles (generate: GenerateModel) (dispatch: Msg -> unit) =
                 prop.className "mb-3 flex gap-2"
                 prop.children [
                     Html.button [
-                        prop.className outlinedButtonClass
+                        prop.className secondaryButtonClass
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllPhaseSpaceFiles)
                     ]
                     Html.button [
-                        prop.className outlinedButtonClass
+                        prop.className secondaryButtonClass
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoPhaseSpaceFiles)
                     ]
@@ -227,7 +159,6 @@ let viewReview (generate: GenerateModel) =
         |> String.concat ", "
 
     Html.div [
-        Html.h3 [ prop.className "text-lg font-semibold"; prop.text "Generate Wizard: Review" ]
         Html.div [
             prop.className "mt-3"
             prop.children [
@@ -328,55 +259,36 @@ let viewGenerateStep (generate: GenerateModel) (dispatch: Msg -> unit) =
     | Result -> viewResult generate
 
 /// Renders wizard navigation controls.
-let viewWizardNavigation (generate: GenerateModel) (dispatch: Msg -> unit) =
-    Html.div [
-        prop.className "mt-6 flex justify-end"
-        prop.children [
-            Html.div [
-                prop.className "flex gap-2"
-                prop.children [
-                    Html.button [
-                        prop.className textButtonClass
-                        prop.text "Cancel"
-                        prop.onClick (fun _ -> dispatch CancelGenerateWizard)
-                    ]
-
-                    if showPreviousButton generate.Step then
-                        Html.button [
-                            prop.className outlinedButtonClass
-                            prop.text "Previous"
-                            prop.onClick (fun _ -> dispatch PreviousGenerateStep)
-                        ]
-
-                    Html.button [
-                        prop.className primaryButtonClass
-                        prop.disabled (disablePrimaryButton generate)
-                        prop.text (primaryButtonText generate.Step)
-                        prop.onClick (fun _ -> onPrimaryClick generate dispatch)
-                    ]
-                ]
-            ]
-        ]
-    ]
-
-/// Renders the Generate page with wizard state.
 let viewGeneratePage (generate: GenerateModel) (dispatch: Msg -> unit) =
     let steps =
         [
-            { Label = "Welcome"; Hint = "Review what Generate will produce for this batch." }
-            { Label = "Components"; Hint = "Choose which TOPAS template components to include." }
-            { Label = "Nodes"; Hint = "Select the configured nodes to generate runs for." }
-            { Label = "Phase-space"; Hint = "Select the phase-space files to combine with nodes." }
-            { Label = "Review"; Hint = "Confirm selections and preview stitched input content." }
-            { Label = "Result"; Hint = "Inspect generated files and run metadata." }
+            { Title = "Welcome"; Instruction = "Review what Generate will create." }
+            { Title = "Components"; Instruction = "Choose TOPAS template components." }
+            { Title = "Nodes"; Instruction = "Choose compute nodes." }
+            { Title = "Phase-space"; Instruction = "Choose phase-space files." }
+            { Title = "Review"; Instruction = "Review one stitched input preview." }
+            { Title = "Result"; Instruction = "Review generated files." }
         ]
-    let currentStepIndex = generate.Step |> function | Welcome -> 0 | SelectComponents -> 1 | SelectNodes -> 2 | SelectPhaseSpaceFiles -> 3 | Review -> 4 | Result -> 5
+    let currentStepIndex =
+        generate.Step
+        |> function
+            | Welcome -> 0
+            | SelectComponents -> 1
+            | SelectNodes -> 2
+            | SelectPhaseSpaceFiles -> 3
+            | Review -> 4
+            | Result -> 5
+    let isFinalAction = generate.Step = Review || generate.Step = Result
 
-    Html.div [
-        viewLinearStepper currentStepIndex steps
-        Html.div [ prop.className "mt-4"; prop.children [ viewGenerateStep generate dispatch ] ]
-        match generate.Error with
-        | Some errorMessage -> Html.p [ prop.className "mt-3 text-sm text-red-700"; prop.text errorMessage ]
-        | None -> Html.none
-        viewWizardNavigation generate dispatch
-    ]
+    viewWizardShell
+        steps
+        currentStepIndex
+        (viewGenerateStep generate dispatch)
+        generate.Error
+        (showPreviousButton generate.Step)
+        (primaryButtonText generate.Step)
+        (disablePrimaryButton generate)
+        (not isFinalAction)
+        (fun () -> dispatch CancelGenerateWizard)
+        (fun () -> dispatch PreviousGenerateStep)
+        (fun () -> onPrimaryClick generate dispatch)

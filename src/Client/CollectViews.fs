@@ -3,8 +3,8 @@ module CollectViews
 open Feliz
 open GenerateTypes
 open CollectLogic
+open SharedWizardViews
 open SAFE
-open GenerateViews
 
 /// Returns classes for collect preflight status badges.
 let collectStatusClass (ok: bool) =
@@ -207,61 +207,35 @@ let viewCollectStep (collect: CollectModel) (dispatch: Msg -> unit) =
     | CollectMergeReview -> viewCollectMergeReview collect
     | CollectResult -> viewCollectResult collect
 
-/// Renders collect wizard navigation controls.
-let viewCollectNavigation (collect: CollectModel) (dispatch: Msg -> unit) =
-    Html.div [
-        prop.className "mt-6 flex justify-end"
-        prop.children [
-            Html.div [
-                prop.className "flex gap-2"
-                prop.children [
-                    Html.button [
-                        prop.className textButtonClass
-                        prop.text "Cancel"
-                        prop.onClick (fun _ -> dispatch CancelCollectWizard)
-                    ]
-
-                    if showPreviousCollectButton collect.Step then
-                        Html.button [
-                            prop.className outlinedButtonClass
-                            prop.text "Previous"
-                            prop.onClick (fun _ -> dispatch PreviousCollectStep)
-                        ]
-
-                    Html.button [
-                        prop.className primaryButtonClass
-                        prop.disabled (disableCollectPrimaryButton collect)
-                        prop.text (collectPrimaryButtonText collect.Step)
-                        prop.onClick (fun _ -> dispatch NextCollectStep)
-                    ]
-                ]
-            ]
-        ]
-    ]
-
 /// Renders full collect wizard page.
 let viewCollectPage (collect: CollectModel) (dispatch: Msg -> unit) =
     let steps =
         [
-            { Label = "Welcome"; Hint = "Review how Collect reads and merges run output files." }
-            { Label = "Batch"; Hint = "Choose the batch to collect from shared run outputs." }
-            { Label = "Preflight"; Hint = "Check CSV/log availability and missing files before collect." }
-            { Label = "Merge"; Hint = "Review planned merged files and summary output paths." }
-            { Label = "Result"; Hint = "Inspect collect completion details and generated outputs." }
+            { Title = "Welcome"; Instruction = "Review what Collect reads and writes." }
+            { Title = "Batch"; Instruction = "Select a batch with TOPAS outputs." }
+            { Title = "Preflight"; Instruction = "Check expected CSV and log files." }
+            { Title = "Review"; Instruction = "Review planned merge and summary outputs." }
+            { Title = "Result"; Instruction = "Review collected outputs." }
         ]
-    let currentStepIndex = collect.Step |> function | CollectWelcome -> 0 | CollectSelectBatch -> 1 | CollectPreflightReview -> 2 | CollectMergeReview -> 3 | CollectResult -> 4
+    let currentStepIndex =
+        collect.Step
+        |> function
+            | CollectWelcome -> 0
+            | CollectSelectBatch -> 1
+            | CollectPreflightReview -> 2
+            | CollectMergeReview -> 3
+            | CollectResult -> 4
+    let isFinalAction = collect.Step = CollectMergeReview || collect.Step = CollectResult
 
-    Html.div [
-        prop.children [
-            viewLinearStepper currentStepIndex steps
-            Html.div [ prop.className "mt-4"; prop.children [ viewCollectStep collect dispatch ] ]
-            match collect.Error with
-            | Some message ->
-                Html.div [
-                    prop.className "mt-3 rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-                    prop.text message
-                ]
-            | None -> Html.none
-            viewCollectNavigation collect dispatch
-        ]
-    ]
+    viewWizardShell
+        steps
+        currentStepIndex
+        (viewCollectStep collect dispatch)
+        collect.Error
+        (showPreviousCollectButton collect.Step)
+        (collectPrimaryButtonText collect.Step)
+        (disableCollectPrimaryButton collect)
+        (not isFinalAction)
+        (fun () -> dispatch CancelCollectWizard)
+        (fun () -> dispatch PreviousCollectStep)
+        (fun () -> dispatch NextCollectStep)
