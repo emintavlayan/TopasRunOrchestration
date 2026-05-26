@@ -9,27 +9,31 @@ type WizardStepItem = {
 }
 
 /// Returns classes for text-style cancel buttons.
-let cancelButtonClass = "btn btn-ghost"
+let cancelButtonClass = "rounded px-3 py-2 text-slate-700 transition hover:bg-slate-100"
 
 /// Returns classes for outlined previous buttons.
-let previousButtonClass = "btn btn-outline"
+let previousButtonClass =
+    "rounded border border-slate-300 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
 
 /// Returns classes for primary action buttons.
-let primaryButtonClass = "btn btn-primary"
+let primaryButtonClass =
+    "rounded bg-blue-700 px-4 py-2 text-white transition hover:bg-blue-800 disabled:opacity-40"
 
 /// Returns classes for one step marker circle based on step state.
 let private stepMarkerClass (isCurrent: bool) (isCompleted: bool) =
-    if isCurrent || isCompleted then
-        "grid h-6 w-6 place-items-center rounded-full bg-primary text-primary-content text-xs font-semibold"
+    if isCurrent then
+        "h-4 w-4 rounded-full border-2 border-blue-700 bg-white"
+    elif isCompleted then
+        "h-4 w-4 rounded-full bg-blue-700"
     else
-        "grid h-6 w-6 place-items-center rounded-full bg-base-300 text-base-content/70 text-xs"
+        "h-4 w-4 rounded-full border border-slate-300 bg-white"
 
 /// Returns classes for one step connector line based on completion state.
 let private stepConnectorClass (isCompleted: bool) =
     if isCompleted then
-        "absolute left-3 top-7 h-[calc(100%-1rem)] w-[2px] bg-primary"
+        "absolute left-[0.45rem] top-4 h-[calc(100%-0.4rem)] w-0.5 bg-blue-700"
     else
-        "absolute left-3 top-7 h-[calc(100%-1rem)] w-[2px] bg-base-300"
+        "absolute left-[0.45rem] top-4 h-[calc(100%-0.4rem)] w-0.5 bg-slate-300"
 
 /// Renders the shared vertical wizard stepper column.
 let private viewVerticalStepper (currentStepIndex: int) (steps: WizardStepItem list) =
@@ -45,7 +49,10 @@ let private viewVerticalStepper (currentStepIndex: int) (steps: WizardStepItem l
                         let isFuture = index > currentStepIndex
 
                         Html.div [
-                            prop.className "relative pb-5 last:pb-0"
+                            prop.className (
+                                "relative rounded-lg pb-5 pr-2 last:pb-0 "
+                                + if isCurrent then "bg-slate-100/80" else ""
+                            )
                             prop.children [
                                 if index < steps.Length - 1 then
                                     Html.div [ prop.className (stepConnectorClass isCompleted) ]
@@ -54,8 +61,7 @@ let private viewVerticalStepper (currentStepIndex: int) (steps: WizardStepItem l
                                     prop.className "flex items-start gap-3"
                                     prop.children [
                                         Html.div [
-                                            prop.className (stepMarkerClass isCurrent isCompleted)
-                                            prop.text (if isCompleted then "v" else $"{index + 1}")
+                                            prop.className ("mt-0.5 " + stepMarkerClass isCurrent isCompleted)
                                         ]
                                         Html.div [
                                             prop.className "min-w-0"
@@ -63,7 +69,7 @@ let private viewVerticalStepper (currentStepIndex: int) (steps: WizardStepItem l
                                                 Html.p [
                                                     prop.className (
                                                         if isCurrent then
-                                                            "text-sm font-semibold text-primary"
+                                                            "text-sm font-semibold text-blue-700"
                                                         elif isFuture then
                                                             "text-sm font-medium text-base-content/60"
                                                         else
@@ -116,7 +122,7 @@ let viewWizardShell
                             ]
 
                             Html.div [
-                                prop.className "flex min-h-[68vh] grow flex-col"
+                                prop.className "flex h-[68vh] grow flex-col"
                                 prop.children [
                                     Html.div [
                                         prop.className "grow overflow-y-auto pr-2 pb-2"

@@ -61,11 +61,11 @@ let view (model: Model) (dispatch: Msg -> unit) =
                             Html.div [
                                 prop.className "flex-1"
                                 prop.children [
-                                    Html.h1 [ prop.className "text-lg font-semibold md:text-2xl"; prop.text "TopasRunOrchestration" ]
+                                    Html.h1 [ prop.className "text-lg font-semibold md:text-2xl"; prop.text "Topas Run Orchestration" ]
                                 ]
                             ]
                             Html.div [
-                                prop.className "flex flex-wrap items-center gap-2"
+                                prop.className "flex items-center gap-2"
                                 prop.children [
                                     topNavButton model.SelectedPage Generate dispatch
                                     topNavButton model.SelectedPage Run dispatch
