@@ -4,6 +4,12 @@
 
 `Collect` consolidates TOPAS run outputs for one generated batch (`seedBase`), producing merged phase-space CSV files and one final dose summary.
 
+Current cluster model:
+
+- run outputs are read from shared `runs/{seedBase}` under AppRoot
+- no node-local copy-back step is required in the current implementation
+- phase-space source files are not managed by Collect
+
 ## Input path rules
 
 Batch id:

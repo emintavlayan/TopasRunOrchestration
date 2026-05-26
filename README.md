@@ -26,7 +26,7 @@ Implemented:
 - Per-phase-space node CSV merge.
 - Final dose summary statistics (mean, median, standard deviation, count).
 - Collect operation with SQLite metadata updates.
-- Basic automated tests for Generate rules and collision preflight.
+- Automated tests across config, generate, run, and collect workflows.
 
 Not implemented yet:
 
@@ -57,12 +57,17 @@ Expected folders under `AppRoot`:
 
 ```text
 templates/   TOPAS source template/component files
-inputs/      generated TOPAS input files
-runs/        TOPAS output/run folders referenced by generated inputs
+inputs/      generated TOPAS input files at inputs/{seedBase}/
+runs/        shared run/output folder at runs/{seedBase}/ (TOPAS CSV/log files are written here)
 outputs/     collect outputs per seed base (merged csv + dose summary)
 database/    SQLite database
 logs/        application/runtime logs
 ```
+
+Notes:
+
+- Phase-space files are not copied or managed by the app; TOPAS input configuration controls where phsp data is read from.
+- Collect reads directly from the shared `runs/{seedBase}` folder; no node copy-back flow is required in the current model.
 
 ## Generate summary
 
@@ -115,6 +120,43 @@ Preflight checks:
 All-or-nothing behavior:
 
 - on any collision error, no files are written and no SQLite rows are inserted.
+
+## Run summary
+
+Run submits one generated batch (`seedBase`) using SQLite batch metadata.
+
+Run writes:
+
+```text
+runs/{seedBase}/run_manifest.tsv
+runs/{seedBase}/run_batch.slurm
+```
+
+Manifest columns:
+
+- task id
+- node name
+- run id
+- input file path
+- log file path
+
+Slurm script execution line:
+
+```bash
+srun --nodes=1 --ntasks=1 --nodelist="$NODE_NAME" "$TOPAS" "$INPUT_FILE" > "$LOG_FILE" 2>&1
+```
+
+Run behavior notes:
+
+- node names come from `appsettings` node configuration
+- partition/topas executable/cpus-per-task come from configuration
+- double-submit is blocked when a batch is already submitted
+- Slurm submission metadata is written back to SQLite
+
+UI display rule:
+
+- server stores full absolute paths
+- Run UI may display AppRoot-relative paths for readability
 
 ## Build, run, test
 

@@ -6,6 +6,8 @@ open GenerateTypes
 open GenerateViews
 open RunViews
 open CollectViews
+open Shared
+open SAFE
 
 /// Returns classes for underline-style tabs in selected/unselected state.
 let tabButtonClass (isSelected: bool) =
@@ -28,7 +30,13 @@ let tabButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
 let viewPageContent (model: Model) (dispatch: Msg -> unit) =
     match model.SelectedPage with
     | Generate -> viewGeneratePage model.Generate dispatch
-    | Run -> viewRunPage model.Run dispatch
+    | Run ->
+        let appRoot =
+            match model.Generate.Config with
+            | Loaded config -> Some config.AppRoot
+            | _ -> None
+
+        viewRunPage appRoot model.Run dispatch
     | Collect -> viewCollectPage model.Collect dispatch
 
 /// Renders the client landing page and selected content.

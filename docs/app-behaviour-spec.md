@@ -26,14 +26,35 @@
 - SQLite metadata persistence for generated batches and runs.
 - SQLite-driven next seed base progression.
 - Collision-safe Generate preflight validation before any write/insert.
+- Run wizard, preflight, Slurm script preview, and submission.
+- Collect wizard, preflight, CSV merge, and dose summary statistics.
 
 ## Not implemented
 
-- Run workflow.
-- Collect workflow.
-- Slurm orchestration.
-- Dose merge/statistics workflow.
 - Full history UI.
+
+## Folder model
+
+- AppRoot is configured in `appsettings`.
+- Generated TOPAS inputs are written to `inputs/{seedBase}/`.
+- TOPAS run outputs are expected directly in shared `runs/{seedBase}/`.
+- Collect outputs are written to `outputs/{seedBase}/`.
+- Phase-space files are not copied/managed by this app; TOPAS configuration defines their source paths.
+
+## Run model
+
+- Run reads generated batch metadata from SQLite.
+- Run writes `runs/{seedBase}/run_manifest.tsv` and `runs/{seedBase}/run_batch.slurm`.
+- Manifest rows include task id, node name, run id, input path, and log path.
+- Slurm execution uses node assignment from manifest:
+  - `srun --nodes=1 --ntasks=1 --nodelist="$NODE_NAME" "$TOPAS" "$INPUT_FILE" > "$LOG_FILE" 2>&1`
+- Node names come from `appsettings` nodes.
+- Run prevents double-submit and stores Slurm job metadata back to SQLite.
+
+## UI path display
+
+- Server data remains full absolute paths.
+- Client UI may show paths relative to AppRoot for readability.
 
 ## Generate safety contract
 
