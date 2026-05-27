@@ -16,7 +16,7 @@ let collectStatusClass (ok: bool) =
 /// Renders collect welcome content.
 let viewCollectWelcome () =
     Html.div [
-        prop.className "space-y-2 text-sm text-slate-700"
+        prop.className "space-y-2 text-sm text-base-content/80"
         prop.children [
             Html.p "Collect reads TOPAS CSV/log outputs for one batch."
             Html.p "It checks expected files, merges node outputs per phase-space, and computes dose statistics."
@@ -39,15 +39,15 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
                     prop.children [
                         Html.thead [
                             Html.tr [
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Select" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Seed base" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Created" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Runs" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Nodes" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Phase-spaces" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Run status" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Collect status" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Summary path" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Select" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Seed base" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Created" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Runs" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Nodes" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Phase-spaces" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Run status" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Collect status" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Summary path" ]
                             ]
                         ]
                         Html.tbody [
@@ -56,13 +56,14 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
                                 let selected = collect.SelectedSeedBase = Some batch.SeedBase
 
                                 Html.tr [
-                                    prop.className (if selected then "bg-blue-50" else "")
+                                    prop.className (if selected then "bg-base-200" else "")
                                     prop.children [
                                         Html.td [
-                                            prop.className "border-b border-slate-100 px-3 py-2"
+                                            prop.className "border-b border-base-200 px-3 py-2"
                                             prop.children [
                                                 Html.input [
                                                     prop.type'.radio
+                                                    prop.className "radio radio-primary radio-sm"
                                                     prop.name "collect-batch"
                                                     prop.isChecked selected
                                                     prop.disabled (not selectable)
@@ -70,14 +71,14 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
                                                 ]
                                             ]
                                         ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text batch.SeedBase ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text batch.CreatedAt ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text $"{batch.GeneratedRunCount}" ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text $"{batch.NodeCount}" ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text $"{batch.PhaseSpaceCount}" ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text (defaultArg batch.RunStatus "-") ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text batch.CollectStatus ]
-                                        Html.td [ prop.className "border-b border-slate-100 px-3 py-2 break-all"; prop.text (defaultArg batch.CollectSummaryPath "-") ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.SeedBase ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CreatedAt ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.GeneratedRunCount}" ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.NodeCount}" ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.PhaseSpaceCount}" ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg batch.RunStatus "-") ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CollectStatus ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2 break-all"; prop.text (defaultArg batch.CollectSummaryPath "-") ]
                                     ]
                                 ]
                         ]
@@ -108,20 +109,20 @@ let viewCollectPreflight (collect: CollectModel) =
                     prop.children [
                         Html.thead [
                             Html.tr [
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Check" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
-                                Html.th [ prop.className "border-b border-slate-200 px-3 py-2 text-left font-semibold"; prop.text "Details" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Check" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
+                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Details" ]
                             ]
                         ]
                         Html.tbody [
                             for check in preview.Preflight.Checks do
                                 Html.tr [
-                                    Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text check.Name ]
+                                    Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text check.Name ]
                                     Html.td [
-                                        prop.className "border-b border-slate-100 px-3 py-2"
+                                        prop.className "border-b border-base-200 px-3 py-2"
                                         prop.children [ Html.span [ prop.className (collectStatusClass check.Ok); prop.text (if check.Ok then "OK" else "Failed") ] ]
                                     ]
-                                    Html.td [ prop.className "border-b border-slate-100 px-3 py-2"; prop.text (defaultArg check.Message "-") ]
+                                    Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg check.Message "-") ]
                                 ]
                         ]
                     ]
@@ -147,7 +148,7 @@ let viewCollectMergeReview (collect: CollectModel) =
     match collect.Preview with
     | Loaded preview ->
         Html.div [
-            prop.className "space-y-3 text-sm text-slate-700"
+            prop.className "space-y-3 text-sm text-base-content/80"
             prop.children [
                 Html.p $"Output folder: {preview.OutputFolder}"
                 Html.p $"Manifest: {preview.ManifestPath}"
@@ -172,7 +173,7 @@ let viewCollectResult (collect: CollectModel) =
     | Loading _ -> Html.p "Running collect..."
     | Loaded value ->
         Html.div [
-            prop.className "space-y-2 text-sm text-slate-700"
+            prop.className "space-y-2 text-sm text-base-content/80"
             prop.children [
                 Html.p [ prop.className "font-semibold text-emerald-700"; prop.text "Collect completed." ]
                 Html.p $"CSV files read: {value.CsvReadCount}"
@@ -211,11 +212,11 @@ let viewCollectStep (collect: CollectModel) (dispatch: Msg -> unit) =
 let viewCollectPage (collect: CollectModel) (dispatch: Msg -> unit) =
     let steps =
         [
-            { Title = "Welcome"; Instruction = "Review what Collect reads and writes." }
-            { Title = "Batch"; Instruction = "Select a batch with TOPAS outputs." }
-            { Title = "Preflight"; Instruction = "Check expected CSV and log files." }
-            { Title = "Review"; Instruction = "Review planned merge and summary outputs." }
-            { Title = "Result"; Instruction = "Review collected outputs." }
+            { Title = "Welcome"; Description = "Review what Collect reads and writes." }
+            { Title = "Batch"; Description = "Select a batch with TOPAS outputs." }
+            { Title = "Preflight"; Description = "Check expected CSV and log files." }
+            { Title = "Review"; Description = "Review planned merge and summary outputs." }
+            { Title = "Result"; Description = "Review collected outputs." }
         ]
     let currentStepIndex =
         collect.Step
@@ -225,8 +226,6 @@ let viewCollectPage (collect: CollectModel) (dispatch: Msg -> unit) =
             | CollectPreflightReview -> 2
             | CollectMergeReview -> 3
             | CollectResult -> 4
-    let isFinalAction = collect.Step = CollectMergeReview || collect.Step = CollectResult
-
     viewWizardShell
         steps
         currentStepIndex
@@ -235,7 +234,6 @@ let viewCollectPage (collect: CollectModel) (dispatch: Msg -> unit) =
         (showPreviousCollectButton collect.Step)
         (collectPrimaryButtonText collect.Step)
         (disableCollectPrimaryButton collect)
-        (not isFinalAction)
         (fun () -> dispatch CancelCollectWizard)
         (fun () -> dispatch PreviousCollectStep)
         (fun () -> dispatch NextCollectStep)

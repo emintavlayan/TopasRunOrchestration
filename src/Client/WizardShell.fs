@@ -2,88 +2,65 @@ module WizardShell
 
 open Feliz
 
-/// Represents one wizard step with title and one-line instruction.
+/// Represents one wizard step with title and one-line description.
 type WizardStepItem = {
     Title: string
-    Instruction: string
+    Description: string
 }
 
-/// Returns classes for text-style cancel buttons.
-let cancelButtonClass = "rounded px-3 py-2 text-slate-700 transition hover:bg-slate-100"
+let private stepTitleClass (isCurrent: bool) (isCompleted: bool) =
+    if isCurrent then "text-primary font-semibold"
+    elif isCompleted then "text-base-content font-medium"
+    else "text-base-content/60"
 
-/// Returns classes for outlined previous buttons.
-let previousButtonClass =
-    "rounded border border-slate-300 bg-white px-3 py-2 text-slate-700 transition hover:bg-slate-50 disabled:opacity-40"
-
-/// Returns classes for primary action buttons.
-let primaryButtonClass =
-    "rounded bg-blue-700 px-4 py-2 text-white transition hover:bg-blue-800 disabled:opacity-40"
-
-/// Returns classes for one step marker circle based on step state.
-let private stepMarkerClass (isCurrent: bool) (isCompleted: bool) =
-    if isCurrent then
-        "h-4 w-4 rounded-full border-2 border-blue-700 bg-white"
-    elif isCompleted then
-        "h-4 w-4 rounded-full bg-blue-700"
-    else
-        "h-4 w-4 rounded-full border border-slate-300 bg-white"
-
-/// Returns classes for one step connector line based on completion state.
-let private stepConnectorClass (isCompleted: bool) =
+let private markerClass (isCurrent: bool) (isCompleted: bool) =
     if isCompleted then
-        "absolute left-[0.45rem] top-4 h-[calc(100%-0.4rem)] w-0.5 bg-blue-700"
+        "h-6 w-6 rounded-full bg-primary text-primary-content text-xs font-semibold flex items-center justify-center"
+    elif isCurrent then
+        "h-6 w-6 rounded-full bg-base-100 text-primary text-xs font-semibold border border-primary ring ring-primary/30 flex items-center justify-center"
     else
-        "absolute left-[0.45rem] top-4 h-[calc(100%-0.4rem)] w-0.5 bg-slate-300"
+        "h-6 w-6 rounded-full bg-base-200 text-base-content/60 text-xs font-semibold border border-base-300 flex items-center justify-center"
 
-/// Renders the shared vertical wizard stepper column.
-let private viewVerticalStepper (currentStepIndex: int) (steps: WizardStepItem list) =
-    Html.div [
-        prop.className "w-64 shrink-0"
+let private connectorClass (isCompleted: bool) =
+    if isCompleted then "w-px flex-1 mt-1 mb-1 bg-primary" else "w-px flex-1 mt-1 mb-1 bg-base-300"
+
+let private viewVerticalStepper (steps: WizardStepItem list) (currentIndex: int) =
+    Html.aside [
+        prop.className "w-[280px] shrink-0 border-r border-base-300 pr-4"
         prop.children [
             Html.div [
-                prop.className "space-y-1"
+                prop.className "pt-2"
                 prop.children [
                     for index, step in steps |> List.indexed do
-                        let isCurrent = index = currentStepIndex
-                        let isCompleted = index < currentStepIndex
-                        let isFuture = index > currentStepIndex
+                        let isCurrent = index = currentIndex
+                        let isCompleted = index < currentIndex
 
                         Html.div [
-                            prop.className (
-                                "relative rounded-lg pb-5 pr-2 last:pb-0 "
-                                + if isCurrent then "bg-slate-100/80" else ""
-                            )
+                            prop.className "flex gap-3"
                             prop.children [
-                                if index < steps.Length - 1 then
-                                    Html.div [ prop.className (stepConnectorClass isCompleted) ]
-
                                 Html.div [
-                                    prop.className "flex items-start gap-3"
+                                    prop.className "flex w-8 shrink-0 flex-col items-center"
                                     prop.children [
                                         Html.div [
-                                            prop.className ("mt-0.5 " + stepMarkerClass isCurrent isCompleted)
+                                            prop.className (markerClass isCurrent isCompleted)
+                                            prop.text $"{index + 1}"
                                         ]
-                                        Html.div [
-                                            prop.className "min-w-0"
-                                            prop.children [
-                                                Html.p [
-                                                    prop.className (
-                                                        if isCurrent then
-                                                            "text-sm font-semibold text-blue-700"
-                                                        elif isFuture then
-                                                            "text-sm font-medium text-base-content/60"
-                                                        else
-                                                            "text-sm font-medium"
-                                                    )
-                                                    prop.text step.Title
-                                                ]
-                                                if isCurrent then
-                                                    Html.p [
-                                                        prop.className "mt-1 text-xs text-base-content/70"
-                                                        prop.text step.Instruction
-                                                    ]
+                                        if index < steps.Length - 1 then
+                                            Html.div [ prop.className (connectorClass isCompleted) ]
+                                    ]
+                                ]
+                                Html.div [
+                                    prop.className "grow pb-6"
+                                    prop.children [
+                                        Html.p [
+                                            prop.className (stepTitleClass isCurrent isCompleted)
+                                            prop.text step.Title
+                                        ]
+                                        if isCurrent then
+                                            Html.p [
+                                                prop.className "mt-1 text-sm text-base-content/70"
+                                                prop.text step.Description
                                             ]
-                                        ]
                                     ]
                                 ]
                             ]
@@ -93,78 +70,66 @@ let private viewVerticalStepper (currentStepIndex: int) (steps: WizardStepItem l
         ]
     ]
 
-/// Renders the shared wizard shell with vertical stepper, content panel, and navigation footer.
+/// Renders the shared wizard shell with sidebar stepper, scrollable content body, and fixed footer actions.
 let viewWizardShell
     (steps: WizardStepItem list)
-    (currentStepIndex: int)
+    (currentIndex: int)
     (content: ReactElement)
-    (errorMessage: string option)
-    (showPrevious: bool)
+    (errorText: string option)
+    (canGoPrevious: bool)
     (primaryText: string)
     (primaryDisabled: bool)
-    (showForwardChevron: bool)
     (onCancel: unit -> unit)
     (onPrevious: unit -> unit)
     (onPrimary: unit -> unit)
     =
     Html.div [
-        prop.className "card w-full border border-base-content/20 bg-base-100 shadow-lg"
+        prop.className "card h-[calc(100vh-8rem)] min-h-[620px] w-full border border-base-300 bg-base-100 shadow-sm"
         prop.children [
             Html.div [
-                prop.className "card-body p-6"
+                prop.className "grid h-full grid-cols-[280px_1fr]"
                 prop.children [
+                    viewVerticalStepper steps currentIndex
                     Html.div [
-                        prop.className "flex gap-8"
+                        prop.className "flex h-full min-w-0 flex-col"
                         prop.children [
                             Html.div [
-                                prop.className "border-r border-base-content/15 pr-6"
-                                prop.children [ viewVerticalStepper currentStepIndex steps ]
+                                prop.className "grow min-h-0 overflow-y-auto overflow-x-hidden p-6"
+                                prop.children [ content ]
                             ]
-
                             Html.div [
-                                prop.className "flex h-[68vh] grow flex-col"
+                                prop.className "border-t border-base-300 p-4"
                                 prop.children [
-                                    Html.div [
-                                        prop.className "grow overflow-y-auto pr-2 pb-2"
-                                        prop.children [
-                                            Html.div [
-                                                prop.className "space-y-4 p-1 text-sm"
-                                                prop.children [ content ]
-                                            ]
-                                        ]
-                                    ]
-
-                                    match errorMessage with
+                                    match errorText with
                                     | Some message ->
                                         Html.div [
-                                            prop.className "alert alert-error mt-3 text-sm"
+                                            prop.className "alert alert-error mb-3"
                                             prop.text message
                                         ]
                                     | None -> Html.none
 
                                     Html.div [
-                                        prop.className "mt-6 flex items-center justify-between border-t border-base-content/15 pt-4"
+                                        prop.className "flex items-center justify-between"
                                         prop.children [
                                             Html.button [
-                                                prop.className cancelButtonClass
+                                                prop.className "btn btn-ghost"
                                                 prop.text "Cancel"
                                                 prop.onClick (fun _ -> onCancel ())
                                             ]
-
                                             Html.div [
                                                 prop.className "flex items-center gap-2"
                                                 prop.children [
-                                                    if showPrevious then
+                                                    if canGoPrevious then
                                                         Html.button [
-                                                            prop.className previousButtonClass
-                                                            prop.text "< Previous"
+                                                            prop.className "btn btn-outline"
+                                                            prop.text "Previous"
                                                             prop.onClick (fun _ -> onPrevious ())
                                                         ]
 
                                                     Html.button [
-                                                        prop.className primaryButtonClass
+                                                        prop.className "btn btn-primary"
                                                         prop.disabled primaryDisabled
-                                                        prop.text (if showForwardChevron then $"{primaryText} >" else primaryText)
+                                                        prop.text primaryText
                                                         prop.onClick (fun _ -> onPrimary ())
                                                     ]
                                                 ]

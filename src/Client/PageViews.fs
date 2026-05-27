@@ -12,7 +12,7 @@ open SAFE
 /// Returns classes for top-level workflow navigation buttons.
 let topNavButtonClass (isSelected: bool) =
     if isSelected then
-        "btn btn-outline btn-primary btn-sm normal-case whitespace-nowrap"
+        "btn btn-primary btn-sm normal-case whitespace-nowrap"
     else
         "btn btn-ghost btn-sm normal-case whitespace-nowrap"
 
@@ -42,14 +42,14 @@ let viewPageContent (model: Model) (dispatch: Msg -> unit) =
 /// Renders the client landing page and selected content.
 let view (model: Model) (dispatch: Msg -> unit) =
     Html.main [
-        prop.className "min-h-screen bg-base-300 text-base-content"
+        prop.className "min-h-screen bg-base-200 text-base-content"
         prop.custom ("data-theme", "light")
         prop.children [
             Html.section [
-                prop.className "mx-auto w-[96vw] max-w-[1600px] px-4 py-6"
+                prop.className "mx-auto w-[96vw] max-w-[1600px] p-4"
                 prop.children [
                     Html.div [
-                        prop.className "navbar mt-2 min-h-16 rounded-box border border-base-content/15 bg-base-100 px-4 shadow-sm"
+                        prop.className "navbar min-h-16 rounded-box border border-base-300 bg-base-100 px-4 shadow-sm"
                         prop.children [
                             Html.div [
                                 prop.className "flex-1 items-center"

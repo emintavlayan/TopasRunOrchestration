@@ -170,7 +170,7 @@ let viewReview (generate: GenerateModel) =
                 Html.p [ prop.className "font-medium"; prop.text "Selected components:" ]
                 if selectedComponents.IsEmpty then
                     Html.p [
-                        prop.className "mt-1 text-sm text-slate-600"
+                        prop.className "mt-1 text-sm text-base-content/70"
                         prop.text "No components selected."
                     ]
                 else
@@ -267,12 +267,12 @@ let viewGenerateStep (generate: GenerateModel) (dispatch: Msg -> unit) =
 let viewGeneratePage (generate: GenerateModel) (dispatch: Msg -> unit) =
     let steps =
         [
-            { Title = "Welcome"; Instruction = "Review what Generate will create." }
-            { Title = "Components"; Instruction = "Choose TOPAS template components." }
-            { Title = "Nodes"; Instruction = "Choose compute nodes." }
-            { Title = "Phase-space"; Instruction = "Choose phase-space files." }
-            { Title = "Review"; Instruction = "Review one stitched input preview." }
-            { Title = "Result"; Instruction = "Review generated files." }
+            { Title = "Welcome"; Description = "Review what Generate will create." }
+            { Title = "Components"; Description = "Choose TOPAS template components." }
+            { Title = "Nodes"; Description = "Choose compute nodes." }
+            { Title = "Phase-space"; Description = "Choose phase-space files." }
+            { Title = "Review"; Description = "Review one stitched input preview." }
+            { Title = "Result"; Description = "Review generated files." }
         ]
     let currentStepIndex =
         generate.Step
@@ -283,8 +283,6 @@ let viewGeneratePage (generate: GenerateModel) (dispatch: Msg -> unit) =
             | SelectPhaseSpaceFiles -> 3
             | Review -> 4
             | Result -> 5
-    let isFinalAction = generate.Step = Review || generate.Step = Result
-
     viewWizardShell
         steps
         currentStepIndex
@@ -293,7 +291,6 @@ let viewGeneratePage (generate: GenerateModel) (dispatch: Msg -> unit) =
         (showPreviousButton generate.Step)
         (primaryButtonText generate.Step)
         (disablePrimaryButton generate)
-        (not isFinalAction)
         (fun () -> dispatch CancelGenerateWizard)
         (fun () -> dispatch PreviousGenerateStep)
         (fun () -> onPrimaryClick generate dispatch)
