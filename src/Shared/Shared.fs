@@ -104,6 +104,15 @@ type RunPreflightResult = {
     Checks: RunPreflightCheck list
 }
 
+type RunNodeScriptPreview = {
+    NodeName: string
+    ManifestPath: string
+    ScriptPath: string
+    TaskCount: int
+    ManifestRowsPreview: RunManifestPreviewRow list
+    ScriptText: string
+}
+
 type RunScriptPreview = {
     SeedBase: string
     ManifestPath: string
@@ -111,6 +120,7 @@ type RunScriptPreview = {
     ScriptText: string
     RunCount: int
     ManifestRowsPreview: RunManifestPreviewRow list
+    NodeScriptPreviews: RunNodeScriptPreview list
     Preflight: RunPreflightResult
 }
 
@@ -120,6 +130,7 @@ type SubmitRunResult = {
     SeedBase: string
     RunStatus: string
     SlurmJobId: string
+    SlurmJobIds: string list
     SubmittedRunCount: int
     ManifestPath: string
     ScriptPath: string

@@ -181,6 +181,57 @@ let private noOutputCsvCollisions (rows: RunManifestRow list) : bool =
 let private noOutputLogCollisions (rows: RunManifestRow list) : bool =
     rows |> List.exists (fun row -> File.Exists(row.OutputFilePath + ".log")) |> not
 
+let private sanitizeNodeFileSuffix (nodeName: string) : string =
+    nodeName.Replace(" ", "-")
+
+type private PlannedNodeBatch = {
+    NodeName: string
+    ManifestPath: string
+    ScriptPath: string
+    ManifestRows: RunManifestPreviewRow list
+}
+
+let private planNodeBatches (settings: TsebtSettings) (seedBase: string) (rows: RunManifestRow list) : PlannedNodeBatch list =
+    let resolveNodeName (row: RunManifestRow) =
+        settings.Nodes
+        |> List.tryFind (fun configuredNode -> configuredNode.Digit = row.NodeDigit)
+        |> Option.map _.Name
+        |> Option.defaultValue $"node{row.NodeDigit.PadLeft(2, '0')}"
+
+    let mappedRows =
+        rows
+        |> List.map (fun row -> {
+            TaskId = 0
+            NodeName = resolveNodeName row
+            RunId = row.RunId
+            InputFilePath = row.InputFilePath
+            LogFilePath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, $"{row.RunId}.log")
+        })
+
+    let rowsByNode =
+        mappedRows
+        |> List.groupBy _.NodeName
+        |> Map.ofList
+
+    settings.Nodes
+    |> List.choose (fun node ->
+        let nodeName = node.Name
+
+        match rowsByNode |> Map.tryFind nodeName with
+        | None -> None
+        | Some nodeRows ->
+            let fileSuffix = sanitizeNodeFileSuffix nodeName
+            let manifestPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, $"run_manifest_{fileSuffix}.tsv")
+            let scriptPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, $"run_batch_{fileSuffix}.slurm")
+            let renumberedRows = nodeRows |> List.mapi (fun index row -> { row with TaskId = index + 1 })
+
+            Some {
+                NodeName = nodeName
+                ManifestPath = manifestPath
+                ScriptPath = scriptPath
+                ManifestRows = renumberedRows
+            })
+
 /// Evaluates Run preflight checks from batch metadata and generated rows.
 let private evaluatePreflight
     (settings: TsebtSettings)
@@ -194,6 +245,15 @@ let private evaluatePreflight
     let noOutputBaseCollisions = noOutputPathCollisions details.Rows
     let noOutputCsv = noOutputCsvCollisions details.Rows
     let noOutputLog = noOutputLogCollisions details.Rows
+    let plannedNodeBatches = if hasRows then planNodeBatches settings details.SeedBase details.Rows else []
+    let noPlannedManifestCollisions =
+        plannedNodeBatches
+        |> List.exists (fun batch -> File.Exists batch.ManifestPath || Directory.Exists batch.ManifestPath)
+        |> not
+    let noPlannedScriptCollisions =
+        plannedNodeBatches
+        |> List.exists (fun batch -> File.Exists batch.ScriptPath || Directory.Exists batch.ScriptPath)
+        |> not
 
     let checks =
         [
@@ -229,6 +289,14 @@ let private evaluatePreflight
                 "No log collisions"
                 noOutputLog
                 (Some "One or more output log files already exist.")
+            runCheck
+                "No run manifest collisions"
+                noPlannedManifestCollisions
+                (Some "One or more planned run manifest paths already exist.")
+            runCheck
+                "No run script collisions"
+                noPlannedScriptCollisions
+                (Some "One or more planned run script paths already exist.")
         ]
 
     {
@@ -277,31 +345,42 @@ let parseSlurmJobId (sbatchOutput: string) : Result<string, string> =
 let buildSlurmScriptText
     (settings: TsebtSettings)
     (seedBase: string)
+    (nodeName: string)
     (manifestPath: string)
     (rowCount: int)
     : string =
-    let slurmOutputPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "slurm-%A_%a.out")
+    let runsFolder = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase)
+    let slurmOutputPath = Path.Combine(runsFolder, "slurm-" + nodeName + "-%A_%a.out")
+    let accountLine =
+        if String.IsNullOrWhiteSpace settings.Slurm.Account then
+            []
+        else
+            [ $"#SBATCH --account={settings.Slurm.Account}" ]
 
     [
-        "#!/usr/bin/env bash"
-        $"#SBATCH --job-name=tsebt-{seedBase}"
-        $"#SBATCH --partition={settings.Slurm.Partition}"
-        $"#SBATCH --cpus-per-task={settings.Slurm.CpusPerTask}"
-        $"#SBATCH --array=1-{rowCount}"
-        $"#SBATCH --output={slurmOutputPath}"
-        ""
-        "set -euo pipefail"
-        ""
-        $"TOPAS=\"{settings.Topas.Executable}\""
-        $"MANIFEST=\"{manifestPath}\""
-        "ROW=$(awk -F '\\t' -v task_id=\"$SLURM_ARRAY_TASK_ID\" '$1 == task_id { print; exit }' \"$MANIFEST\")"
-        "if [ -z \"$ROW\" ]; then"
-        "  echo \"Manifest row not found for task id $SLURM_ARRAY_TASK_ID\" >&2"
-        "  exit 1"
-        "fi"
-        "IFS=$'\\t' read -r TASK_ID NODE_NAME RUN_ID INPUT_FILE LOG_FILE <<< \"$ROW\""
-        "srun --nodes=1 --ntasks=1 --nodelist=\"$NODE_NAME\" \"$TOPAS\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1"
+        [ "#!/usr/bin/env bash"
+          $"#SBATCH --job-name=tsebt-{seedBase}-{nodeName}"
+          $"#SBATCH --partition={settings.Slurm.Partition}" ]
+        accountLine
+        [ $"#SBATCH --cpus-per-task={settings.Slurm.CpusPerTask}"
+          $"#SBATCH --nodelist={nodeName}"
+          $"#SBATCH --array=1-{rowCount}"
+          $"#SBATCH --chdir={runsFolder}"
+          $"#SBATCH --output={slurmOutputPath}"
+          ""
+          "set -euo pipefail"
+          ""
+          $"TOPAS=\"{settings.Topas.Executable}\""
+          $"MANIFEST=\"{manifestPath}\""
+          "ROW=$(awk -F '\\t' -v task_id=\"$SLURM_ARRAY_TASK_ID\" '$1 == task_id { print; exit }' \"$MANIFEST\")"
+          "if [ -z \"$ROW\" ]; then"
+          "  echo \"Manifest row not found for task id $SLURM_ARRAY_TASK_ID\" >&2"
+          "  exit 1"
+          "fi"
+          "IFS=$'\\t' read -r TASK_ID NODE_NAME RUN_ID INPUT_FILE LOG_FILE <<< \"$ROW\""
+          "\"$TOPAS\" \"$INPUT_FILE\" > \"$LOG_FILE\" 2>&1" ]
     ]
+    |> List.concat
     |> String.concat "\n"
 
 /// Executes sbatch for the given script path and returns combined process output.
@@ -350,22 +429,35 @@ let previewRun (settings: TsebtSettings) (seedBase: string) : Result<RunScriptPr
     result {
         let! details = getRunBatchDetails settings seedBase
         let! preflight = preflightRun settings seedBase
-        let manifestPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "run_manifest.tsv")
-        let scriptPath = Path.Combine(settings.AppRoot, settings.Paths.Runs, seedBase, "run_batch.slurm")
-
-        let manifestRows = details.Rows |> List.mapi (fun index row -> toManifestPreviewRow settings seedBase (index + 1) row)
-
-        let manifestRowsPreview = manifestRows |> List.truncate 20
-        let scriptText = buildSlurmScriptText settings seedBase manifestPath manifestRows.Length
+        let nodeBatches = planNodeBatches settings seedBase details.Rows
+        let firstNode = nodeBatches |> List.tryHead
+        let firstManifestPath = firstNode |> Option.map _.ManifestPath |> Option.defaultValue ""
+        let firstScriptPath = firstNode |> Option.map _.ScriptPath |> Option.defaultValue ""
+        let firstScriptText =
+            firstNode
+            |> Option.map (fun batch -> buildSlurmScriptText settings seedBase batch.NodeName batch.ManifestPath batch.ManifestRows.Length)
+            |> Option.defaultValue ""
+        let firstRows = firstNode |> Option.map _.ManifestRows |> Option.defaultValue []
+        let nodeScriptPreviews =
+            nodeBatches
+            |> List.map (fun batch -> {
+                NodeName = batch.NodeName
+                ManifestPath = batch.ManifestPath
+                ScriptPath = batch.ScriptPath
+                TaskCount = batch.ManifestRows.Length
+                ManifestRowsPreview = batch.ManifestRows |> List.truncate 20
+                ScriptText = buildSlurmScriptText settings seedBase batch.NodeName batch.ManifestPath batch.ManifestRows.Length
+            })
 
         return
             {
                 SeedBase = seedBase
-                ManifestPath = manifestPath
-                ScriptPath = scriptPath
-                ScriptText = scriptText
+                ManifestPath = firstManifestPath
+                ScriptPath = firstScriptPath
+                ScriptText = firstScriptText
                 RunCount = details.GeneratedInputCount
-                ManifestRowsPreview = manifestRowsPreview
+                ManifestRowsPreview = firstRows |> List.truncate 20
+                NodeScriptPreviews = nodeScriptPreviews
                 Preflight = preflight
             }
     }
@@ -374,7 +466,7 @@ let previewRun (settings: TsebtSettings) (seedBase: string) : Result<RunScriptPr
 let private updateRunSubmissionStatus
     (connection: SqliteConnection)
     (seedBase: string)
-    (slurmJobId: string)
+    (slurmJobIds: string list)
     (manifestPath: string)
     (scriptPath: string)
     (sbatchOutput: string)
@@ -382,6 +474,7 @@ let private updateRunSubmissionStatus
     : Result<SubmitRunResult, string> =
     try
         let submittedAt = DateTime.UtcNow.ToString("O")
+        let slurmJobId = String.concat "," slurmJobIds
         use command = connection.CreateCommand()
         command.CommandText <- "UPDATE generated_batches SET run_status = $runStatus, slurm_job_id = $slurmJobId, submitted_at = $submittedAt, manifest_path = $manifestPath, script_path = $scriptPath WHERE seed_base = $seedBase;"
         command.Parameters.AddWithValue("$runStatus", "Submitted") |> ignore
@@ -407,6 +500,7 @@ let private updateRunSubmissionStatus
                     SeedBase = seedBase
                     RunStatus = "Submitted"
                     SlurmJobId = slurmJobId
+                    SlurmJobIds = slurmJobIds
                     SubmittedRunCount = submittedRunCount
                     ManifestPath = manifestPath
                     ScriptPath = scriptPath
@@ -435,20 +529,68 @@ let submitRun (settings: TsebtSettings) (request: SubmitRunRequest) : Result<Sub
         if not preview.Preflight.CanSubmit then
             return! Error $"Run preflight failed for seed base: {request.SeedBase}"
 
-        let manifestRows = details.Rows |> List.mapi (fun index row -> toManifestPreviewRow settings request.SeedBase (index + 1) row)
+        let nodeBatches = planNodeBatches settings request.SeedBase details.Rows
+        let collisions =
+            nodeBatches
+            |> List.collect (fun batch -> [ batch.ManifestPath; batch.ScriptPath ])
+            |> List.filter (fun path -> File.Exists path || Directory.Exists path)
+
+        if not collisions.IsEmpty then
+            let collisionText = String.concat ", " collisions
+            return! Error $"Run preflight failed for seed base: {request.SeedBase}. Existing manifest/script paths: {collisionText}"
 
         let manifestHeader = "task_id\tnode_name\trun_id\tinput_file_path\tlog_file_path"
-        let manifestLines = manifestRows |> List.map formatManifestRow
-        let manifestText = String.concat "\n" (manifestHeader :: manifestLines)
+        let rec submitNodeBatches
+            (pending: PlannedNodeBatch list)
+            (submittedJobIds: string list)
+            (submittedOutputs: string list)
+            : Result<string list * string list, string> =
+            result {
+                match pending with
+                | [] -> return submittedJobIds, submittedOutputs
+                | batch :: rest ->
+                    let manifestLines = batch.ManifestRows |> List.map formatManifestRow
+                    let manifestText = String.concat "\n" (manifestHeader :: manifestLines)
+                    let scriptText = buildSlurmScriptText settings request.SeedBase batch.NodeName batch.ManifestPath batch.ManifestRows.Length
+                    do! writeRunBatchFiles batch.ManifestPath manifestText batch.ScriptPath scriptText
 
-        do! writeRunBatchFiles preview.ManifestPath manifestText preview.ScriptPath preview.ScriptText
-        let! sbatchOutput = runSbatchProcess preview.ScriptPath
-        let! slurmJobId = parseSlurmJobId sbatchOutput
+                    let! sbatchOutput =
+                        runSbatchProcess batch.ScriptPath
+                        |> Result.mapError (fun err ->
+                            if submittedJobIds.IsEmpty then
+                                err
+                            else
+                                let idsText = String.concat "," submittedJobIds
+                                $"{err} Submitted job ids before failure: {idsText}")
+
+                    let! slurmJobId =
+                        parseSlurmJobId sbatchOutput
+                        |> Result.mapError (fun err ->
+                            if submittedJobIds.IsEmpty then
+                                err
+                            else
+                                let idsText = String.concat "," submittedJobIds
+                                $"{err} Submitted job ids before failure: {idsText}")
+
+                    return!
+                        submitNodeBatches
+                            rest
+                            (submittedJobIds @ [ slurmJobId ])
+                            (submittedOutputs @ [ $"[{batch.NodeName}] {sbatchOutput}" ])
+            }
+
+        let! submittedJobIds, submittedOutputs = submitNodeBatches nodeBatches [] []
+
+        let allManifestPaths = nodeBatches |> List.map _.ManifestPath
+        let allScriptPaths = nodeBatches |> List.map _.ScriptPath
+        let sbatchOutput = String.concat "\n" submittedOutputs
+        let primaryManifestPath = allManifestPaths |> List.tryHead |> Option.defaultValue ""
+        let primaryScriptPath = allScriptPaths |> List.tryHead |> Option.defaultValue ""
 
         try
             use connection = new SqliteConnection(toConnectionString settings)
             connection.Open()
-            return! updateRunSubmissionStatus connection request.SeedBase slurmJobId preview.ManifestPath preview.ScriptPath sbatchOutput manifestRows.Length
+            return! updateRunSubmissionStatus connection request.SeedBase submittedJobIds primaryManifestPath primaryScriptPath sbatchOutput details.Rows.Length
         with ex ->
             return! Error $"Failed submitting run batch: {ex.Message}"
     }

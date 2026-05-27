@@ -49,6 +49,7 @@ let buildSettings (appRoot: string) : TsebtSettings =
         Slurm = {
             Partition = "compute"
             CpusPerTask = 1
+            Account = "fysiker"
         }
         Nodes = [
             { Name = "monte-carlo-01"; Digit = "1" }

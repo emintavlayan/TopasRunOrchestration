@@ -147,8 +147,6 @@ let viewPreflight (run: RunModel) =
 let viewSlurmScript (appRoot: string option) (run: RunModel) =
     match run.Preview with
     | Loaded preview ->
-        let manifestDisplayPath = makeRelativePath appRoot preview.ManifestPath
-        let scriptDisplayPath = makeRelativePath appRoot preview.ScriptPath
         let rootDisplay = defaultArg appRoot "-"
 
         Html.div [
@@ -160,48 +158,56 @@ let viewSlurmScript (appRoot: string option) (run: RunModel) =
                         Html.p [ prop.text $"Seed base: {preview.SeedBase}" ]
                         Html.p [ prop.text $"Generated runs: {preview.RunCount}" ]
                         Html.p [ prop.className "md:col-span-2 break-all font-mono text-xs"; prop.text $"Root: {rootDisplay}" ]
-                        Html.p [ prop.className "break-all font-mono text-xs"; prop.text $"Manifest: {manifestDisplayPath}" ]
-                        Html.p [ prop.className "break-all font-mono text-xs"; prop.text $"Script: {scriptDisplayPath}" ]
                     ]
                 ]
-                Html.h4 [ prop.className "font-semibold"; prop.text "Manifest rows (first entries)" ]
-                Html.div [
-                    prop.className "overflow-x-auto"
-                    prop.children [
-                        Html.table [
-                            prop.className "table table-zebra text-xs"
-                            prop.children [
-                                Html.thead [
-                                    Html.tr [
-                                        Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Task" ]
-                                        Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Node" ]
-                                        Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Run id" ]
-                                        Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Input" ]
-                                        Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Log" ]
+                for nodePreview in preview.NodeScriptPreviews do
+                    let manifestDisplayPath = makeRelativePath appRoot nodePreview.ManifestPath
+                    let scriptDisplayPath = makeRelativePath appRoot nodePreview.ScriptPath
+                    Html.h4 [ prop.className "font-semibold"; prop.text $"Node: {nodePreview.NodeName}" ]
+                    Html.div [
+                        prop.className "space-y-2"
+                        prop.children [
+                            Html.p [ prop.className "break-all font-mono text-xs"; prop.text $"Manifest: {manifestDisplayPath}" ]
+                            Html.p [ prop.className "break-all font-mono text-xs"; prop.text $"Script: {scriptDisplayPath}" ]
+                            Html.p [ prop.text $"Task count: {nodePreview.TaskCount}" ]
+                            Html.div [
+                                prop.className "overflow-x-auto"
+                                prop.children [
+                                    Html.table [
+                                        prop.className "table table-zebra text-xs"
+                                        prop.children [
+                                            Html.thead [
+                                                Html.tr [
+                                                    Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Task" ]
+                                                    Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Node" ]
+                                                    Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Run id" ]
+                                                    Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Input" ]
+                                                    Html.th [ prop.className "border-b border-slate-200 px-2 py-1 text-left"; prop.text "Log" ]
+                                                ]
+                                            ]
+                                            Html.tbody [
+                                                for row in nodePreview.ManifestRowsPreview do
+                                                    let inputDisplayPath = makeRelativePath appRoot row.InputFilePath
+                                                    let logDisplayPath = makeRelativePath appRoot row.LogFilePath
+
+                                                    Html.tr [
+                                                        Html.td [ prop.className "border-b border-slate-100 px-2 py-1"; prop.text $"{row.TaskId}" ]
+                                                        Html.td [ prop.className "border-b border-slate-100 px-2 py-1"; prop.text row.NodeName ]
+                                                        Html.td [ prop.className "border-b border-slate-100 px-2 py-1"; prop.text row.RunId ]
+                                                        Html.td [ prop.className "border-b border-slate-100 px-2 py-1 break-all font-mono"; prop.text inputDisplayPath ]
+                                                        Html.td [ prop.className "border-b border-slate-100 px-2 py-1 break-all font-mono"; prop.text logDisplayPath ]
+                                                    ]
+                                            ]
+                                        ]
                                     ]
                                 ]
-                                Html.tbody [
-                                    for row in preview.ManifestRowsPreview do
-                                        let inputDisplayPath = makeRelativePath appRoot row.InputFilePath
-                                        let logDisplayPath = makeRelativePath appRoot row.LogFilePath
-
-                                        Html.tr [
-                                            Html.td [ prop.className "border-b border-slate-100 px-2 py-1"; prop.text $"{row.TaskId}" ]
-                                            Html.td [ prop.className "border-b border-slate-100 px-2 py-1"; prop.text row.NodeName ]
-                                            Html.td [ prop.className "border-b border-slate-100 px-2 py-1"; prop.text row.RunId ]
-                                            Html.td [ prop.className "border-b border-slate-100 px-2 py-1 break-all font-mono"; prop.text inputDisplayPath ]
-                                            Html.td [ prop.className "border-b border-slate-100 px-2 py-1 break-all font-mono"; prop.text logDisplayPath ]
-                                        ]
-                                ]
+                            ]
+                            Html.pre [
+                                prop.className "max-h-80 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
+                                prop.text nodePreview.ScriptText
                             ]
                         ]
                     ]
-                ]
-                Html.h4 [ prop.className "font-semibold"; prop.text "Slurm script" ]
-                Html.pre [
-                    prop.className "max-h-80 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
-                    prop.text preview.ScriptText
-                ]
             ]
         ]
     | Loading _ -> Html.p "Loading script preview..."
@@ -212,11 +218,12 @@ let viewRunResult (run: RunModel) =
     match run.SubmitResult with
     | Loading _ -> Html.p "Submitting to Slurm..."
     | Loaded resultValue ->
+        let jobIdsText = String.concat ", " resultValue.SlurmJobIds
         Html.div [
             prop.className "space-y-2 text-sm text-slate-700"
             prop.children [
                 Html.p [ prop.className "font-semibold text-emerald-700"; prop.text "Batch submitted." ]
-                Html.p [ prop.text $"Slurm job id: {resultValue.SlurmJobId}" ]
+                Html.p [ prop.text $"Slurm job ids: {jobIdsText}" ]
                 Html.p [ prop.text $"Submitted run count: {resultValue.SubmittedRunCount}" ]
                 Html.p [ prop.text $"Manifest path: {resultValue.ManifestPath}" ]
                 Html.p [ prop.text $"Script path: {resultValue.ScriptPath}" ]

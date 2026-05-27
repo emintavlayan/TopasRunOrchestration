@@ -12,16 +12,9 @@ open SAFE
 /// Returns classes for top-level workflow navigation buttons.
 let topNavButtonClass (isSelected: bool) =
     if isSelected then
-        "btn btn-primary btn-sm md:btn-md normal-case gap-2 whitespace-nowrap"
+        "btn btn-outline btn-primary btn-sm normal-case whitespace-nowrap"
     else
-        "btn btn-ghost btn-sm md:btn-md normal-case gap-2 whitespace-nowrap"
-
-/// Returns a small icon for each top-level workflow page.
-let pageIcon (page: Page) =
-    match page with
-    | Generate -> Html.span [ prop.className "text-base"; prop.text "⚙" ]
-    | Run -> Html.span [ prop.className "text-base"; prop.text "▶" ]
-    | Collect -> Html.span [ prop.className "text-base"; prop.text "📥" ]
+        "btn btn-ghost btn-sm normal-case whitespace-nowrap"
 
 /// Renders one top-level navigation button.
 let topNavButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
@@ -29,7 +22,7 @@ let topNavButton (selectedPage: Page) (page: Page) (dispatch: Msg -> unit) =
 
     Html.button [
         prop.className (topNavButtonClass isSelected)
-        prop.children [ pageIcon page; Html.span (pageLabel page) ]
+        prop.text (pageLabel page)
         prop.onClick (fun _ -> dispatch (SelectPage page))
     ]
 
@@ -56,16 +49,16 @@ let view (model: Model) (dispatch: Msg -> unit) =
                 prop.className "mx-auto w-[96vw] max-w-[1600px] px-4 py-6"
                 prop.children [
                     Html.div [
-                        prop.className "navbar mt-2 rounded-box border border-base-content/20 bg-base-100 px-4 shadow-md"
+                        prop.className "navbar mt-2 min-h-16 rounded-box border border-base-content/15 bg-base-100 px-4 shadow-sm"
                         prop.children [
                             Html.div [
-                                prop.className "flex-1"
+                                prop.className "flex-1 items-center"
                                 prop.children [
-                                    Html.h1 [ prop.className "text-lg font-semibold md:text-2xl"; prop.text "Topas Run Orchestration" ]
+                                    Html.h1 [ prop.className "text-base font-semibold tracking-tight md:text-lg"; prop.text "Topas Run Orchestration" ]
                                 ]
                             ]
                             Html.div [
-                                prop.className "flex items-center gap-2"
+                                prop.className "flex flex-nowrap items-center justify-end gap-2"
                                 prop.children [
                                     topNavButton model.SelectedPage Generate dispatch
                                     topNavButton model.SelectedPage Run dispatch

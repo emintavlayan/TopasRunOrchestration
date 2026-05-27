@@ -30,6 +30,7 @@ type TsebtTopas = { Executable: string }
 type TsebtSlurm = {
     Partition: string
     CpusPerTask: int
+    Account: string
 }
 
 type TsebtSettings = {
@@ -132,6 +133,7 @@ let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
     let topasExecutable = valueOrDefault cfg "Tsebt:Topas:Executable" "topas"
     let slurmPartition = valueOrDefault cfg "Tsebt:Slurm:Partition" "compute"
     let slurmCpusPerTask = intOrDefault cfg "Tsebt:Slurm:CpusPerTask" 1
+    let slurmAccount = valueOrDefault cfg "Tsebt:Slurm:Account" ""
     let! nodes = readNodes cfg
     let! phaseSpaceFiles = readPhaseSpaceFiles cfg
     let! _ = validateNonEmptyList "Tsebt:Nodes" nodes
@@ -160,6 +162,7 @@ let load (cfg: IConfiguration) : Result<TsebtSettings, string> = result {
         Slurm = {
             Partition = slurmPartition
             CpusPerTask = slurmCpusPerTask
+            Account = slurmAccount
         }
         Nodes = nodes
         PhaseSpaceFiles = phaseSpaceFiles
