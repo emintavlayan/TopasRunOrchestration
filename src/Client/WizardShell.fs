@@ -112,7 +112,7 @@ let viewWizardShell
                                         prop.className "flex items-center justify-between"
                                         prop.children [
                                             Html.button [
-                                                prop.className "btn btn-ghost"
+                                                prop.className "px-2 py-1 text-sm text-base-content/80 transition hover:text-base-content"
                                                 prop.text "Cancel"
                                                 prop.onClick (fun _ -> onCancel ())
                                             ]

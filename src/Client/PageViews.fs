@@ -52,13 +52,13 @@ let view (model: Model) (dispatch: Msg -> unit) =
                         prop.className "navbar min-h-16 rounded-box border border-base-300 bg-base-100 px-4 shadow-sm"
                         prop.children [
                             Html.div [
-                                prop.className "flex-1 items-center"
+                                prop.className "flex-1"
                                 prop.children [
-                                    Html.h1 [ prop.className "text-base font-semibold tracking-tight md:text-lg"; prop.text "Topas Run Orchestration" ]
+                                    Html.h1 [ prop.className "text-lg font-semibold tracking-tight md:text-xl"; prop.text "Topas Run Orchestration" ]
                                 ]
                             ]
                             Html.div [
-                                prop.className "flex flex-nowrap items-center justify-end gap-2"
+                                prop.className "flex-none flex flex-nowrap items-center gap-2"
                                 prop.children [
                                     topNavButton model.SelectedPage Generate dispatch
                                     topNavButton model.SelectedPage Run dispatch
