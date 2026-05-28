@@ -29,24 +29,13 @@ let private toAppConfigView (settings: TsebtConfig.TsebtSettings) (seedBase: str
     ]
 }
 
-/// Builds IConfiguration from base and environment-specific appsettings plus environment variables.
+/// Builds IConfiguration from appsettings.json plus environment variables.
 let buildConfiguration () : IConfiguration =
     let basePath = AppContext.BaseDirectory
-
-    let environmentName =
-        match Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") with
-        | value when not (String.IsNullOrWhiteSpace value) -> value
-        | _ ->
-            match Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT") with
-            | value when not (String.IsNullOrWhiteSpace value) -> value
-            | _ -> "Production"
-
-    let environmentAppsettingsFile = $"appsettings.{environmentName}.json"
 
     ConfigurationBuilder()
         .SetBasePath(basePath)
         .AddJsonFile("appsettings.json", false, false)
-        .AddJsonFile(environmentAppsettingsFile, true, false)
         .AddEnvironmentVariables()
         .Build()
 
