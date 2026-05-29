@@ -161,7 +161,8 @@ let viewCollectMergeReview (collect: CollectModel) =
                             Html.li path
                     ]
                 ]
-                Html.p "Summary statistics: mean, median, standard deviation, count."
+                Html.p "Node merge: sums dose across nodes and reports node mean, SD, SEM, and relative SEM."
+                Html.p "Final summary: sums dose across phase-space files and reports phase-space mean, median, SD, SEM, and relative SEM."
             ]
         ]
     | Loading _ -> Html.p "Loading collect review..."
@@ -176,16 +177,19 @@ let viewCollectResult (collect: CollectModel) =
             prop.className "space-y-2 text-sm text-base-content/80"
             prop.children [
                 Html.p [ prop.className "font-semibold text-emerald-700"; prop.text "Collect completed." ]
+                Html.p $"Status: {value.Status}"
                 Html.p $"CSV files read: {value.CsvReadCount}"
                 Html.p $"Logs found: {value.LogFoundCount}"
                 Html.p $"Merged phase-space count: {value.MergedPhaseSpaceCount}"
+                Html.p $"Output folder: {value.OutputFolder}"
                 Html.p $"Summary path: {value.SummaryPath}"
+                Html.p $"Manifest path: {value.ManifestPath}"
                 Html.h4 [ prop.className "font-semibold"; prop.text "Merged files" ]
                 Html.ul [
                     prop.className "list-disc pl-5"
                     prop.children [
                         for merged in value.MergedFiles do
-                            Html.li $"{merged.PhaseSpaceIndex}: {merged.MergedFilePath}"
+                            Html.li $"{merged.PhaseSpaceIndex}: {merged.MergedFilePath} (source csv count: {merged.SourceCsvCount})"
                     ]
                 ]
             ]
