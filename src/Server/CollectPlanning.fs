@@ -20,6 +20,10 @@ let runFolderPath (settings: TsebtSettings) (seedBase: string) : string =
 let outputFolderPath (settings: TsebtSettings) (seedBase: string) : string =
     Path.Combine(settings.AppRoot, settings.Paths.Outputs, seedBase)
 
+/// Resolves the absolute merged collect output folder path for one seed base.
+let mergedOutputFolderPath (settings: TsebtSettings) (seedBase: string) : string =
+    Path.Combine(outputFolderPath settings seedBase, "merged")
+
 /// Builds expected csv and log file paths from one generated run row.
 let expectedCsvAndLogPaths (row: CollectRunRow) : string * string =
     row.OutputFilePath + ".csv", row.OutputFilePath + ".log"
@@ -33,7 +37,7 @@ let collectPhaseSpaceIndexes (rows: CollectRunRow list) : string list =
 
 /// Builds planned merged csv output paths for each phase-space index.
 let plannedMergedFiles (settings: TsebtSettings) (seedBase: string) (rows: CollectRunRow list) : string list =
-    let outputFolder = outputFolderPath settings seedBase
+    let outputFolder = mergedOutputFolderPath settings seedBase
 
     rows
     |> collectPhaseSpaceIndexes

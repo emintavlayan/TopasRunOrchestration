@@ -231,28 +231,15 @@ let private buildCollectManifestLines (rows: CollectRunRow list) : string list =
 
     header :: lines
 
-/// Returns true when folder exists and contains at least one file.
-let private folderHasFiles (folderPath: string) : bool =
-    Directory.Exists folderPath
-    && Directory.EnumerateFileSystemEntries(folderPath, "*", SearchOption.TopDirectoryOnly)
-        |> Seq.isEmpty
-        |> not
-
 /// Validates output collision rules before collect writes any files.
 let private validateCollectOutputCollisions
-    (outputFolder: string)
     (plannedMergedFilesList: string list)
     (summaryPath: string)
-    (manifestPath: string)
     : Result<unit, string> =
-    if folderHasFiles outputFolder then
-        Error $"Collect output folder already exists and is not empty: {outputFolder}"
-    elif plannedMergedFilesList |> List.exists File.Exists then
+    if plannedMergedFilesList |> List.exists File.Exists then
         Error "One or more planned merged csv files already exist."
     elif File.Exists summaryPath then
         Error $"Summary output file already exists: {summaryPath}"
-    elif File.Exists manifestPath then
-        Error $"Collect manifest file already exists: {manifestPath}"
     else
         Ok()
 
@@ -285,7 +272,7 @@ let private mergePhaseSpaceCsvFiles
             |> List.map fst
             |> List.distinct
 
-        let outputPath = Path.Combine(outputFolderPath settings seedBase, $"phsp{phaseSpaceIndex}_merged.csv")
+        let outputPath = Path.Combine(mergedOutputFolderPath settings seedBase, $"phsp{phaseSpaceIndex}_merged.csv")
 
         result {
             do! mergeNodeCsvFilesForPhaseSpace csvInputPaths outputPath
@@ -356,7 +343,7 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
             let manifestPath = plannedManifestPath settings request.SeedBase
             let plannedMergedFilesList = plannedMergedFiles settings request.SeedBase rows
 
-            do! validateCollectOutputCollisions outputFolder plannedMergedFilesList summaryPath manifestPath
+            do! validateCollectOutputCollisions plannedMergedFilesList summaryPath
 
             let manifestLines = buildCollectManifestLines rows
             do! writeCollectManifest manifestPath manifestLines
