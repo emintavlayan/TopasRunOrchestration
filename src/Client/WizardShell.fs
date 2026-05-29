@@ -24,9 +24,30 @@ let private markerClass (isCurrent: bool) (isCompleted: bool) =
 let private connectorClass (isCompleted: bool) =
     if isCompleted then "w-px flex-1 mt-1 mb-1 bg-primary" else "w-px flex-1 mt-1 mb-1 bg-base-300"
 
+/// Renders a bounded scroll panel for long list-based content.
+let viewScrollPanel (children: ReactElement list) =
+    Html.div [
+        prop.className "max-h-full min-h-0 overflow-y-auto rounded-box border border-base-300 bg-base-200/40 p-3"
+        prop.children children
+    ]
+
+/// Renders a bounded scroll wrapper for table content.
+let viewTableScroll (content: ReactElement) =
+    Html.div [
+        prop.className "max-h-[min(50vh,28rem)] overflow-auto rounded-box border border-base-300"
+        prop.children [ content ]
+    ]
+
+/// Renders a bounded monospace code block for previews and scripts.
+let viewCodeScroll (text: string) =
+    Html.pre [
+        prop.className "max-h-[min(55vh,32rem)] overflow-auto rounded-box bg-base-200 p-4 text-sm font-mono whitespace-pre"
+        prop.text text
+    ]
+
 let private viewVerticalStepper (steps: WizardStepItem list) (currentIndex: int) =
     Html.aside [
-        prop.className "w-[280px] shrink-0 border-r border-base-300 pr-4"
+        prop.className "h-full min-h-0 w-[280px] shrink-0 overflow-y-auto border-r border-base-300 pr-4"
         prop.children [
             Html.div [
                 prop.className "pt-2"
@@ -84,27 +105,27 @@ let viewWizardShell
     (onPrimary: unit -> unit)
     =
     Html.div [
-        prop.className "card h-[calc(100vh-8rem)] min-h-[620px] w-full border border-base-300 bg-base-100 shadow-sm"
+        prop.className "card h-[calc(100dvh-7rem)] min-h-0 w-full overflow-hidden border border-base-300 bg-base-100 shadow-sm"
         prop.children [
             Html.div [
-                prop.className "grid h-full grid-cols-[280px_1fr]"
+                prop.className "grid h-full min-h-0 grid-cols-[280px_1fr] overflow-hidden"
                 prop.children [
                     viewVerticalStepper steps currentIndex
                     Html.div [
-                        prop.className "flex h-full min-w-0 flex-col"
+                        prop.className "flex h-full min-h-0 min-w-0 flex-col"
                         prop.children [
                             Html.div [
-                                prop.className "grow min-h-0 overflow-y-auto overflow-x-hidden p-6"
+                                prop.className "flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-6"
                                 prop.children [ content ]
                             ]
                             Html.div [
-                                prop.className "border-t border-base-300 p-4"
+                                prop.className "shrink-0 border-t border-base-300 bg-base-100 p-4"
                                 prop.children [
                                     match errorText with
                                     | Some message ->
                                         Html.div [
-                                            prop.className "alert alert-error mb-3"
-                                            prop.text message
+                                            prop.className "alert alert-error mb-3 max-h-32 overflow-y-auto break-words"
+                                            prop.children [ Html.span message ]
                                         ]
                                     | None -> Html.none
 
