@@ -671,26 +671,37 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                 },
                 Cmd.none
         | CollectMergeReview ->
-            match model.Collect.SelectedSeedBase, model.Collect.Preview with
-            | Some seedBase, Loaded preview when preview.Preflight.CanCollect ->
+            match model.Collect.CollectResult with
+            | Loading _ ->
                 {
                     model with
                         Collect = {
                             model.Collect with
-                                CollectResult = model.Collect.CollectResult.StartLoading()
-                                Error = None
-                        }
-                },
-                runCollectBatchCmd { SeedBase = seedBase }
-            | _ ->
-                {
-                    model with
-                        Collect = {
-                            model.Collect with
-                                Error = Some "Cannot collect. Review preflight and selection."
+                                Error = Some "Collect is already running."
                         }
                 },
                 Cmd.none
+            | _ ->
+                match model.Collect.SelectedSeedBase, model.Collect.Preview with
+                | Some seedBase, Loaded preview when preview.Preflight.CanCollect ->
+                    {
+                        model with
+                            Collect = {
+                                model.Collect with
+                                    CollectResult = model.Collect.CollectResult.StartLoading()
+                                    Error = None
+                            }
+                    },
+                    runCollectBatchCmd { SeedBase = seedBase }
+                | _ ->
+                    {
+                        model with
+                            Collect = {
+                                model.Collect with
+                                    Error = Some "Cannot collect. Review preflight and selection."
+                            }
+                    },
+                    Cmd.none
         | CollectResult ->
             { model with Collect = initialCollectModel () }, Cmd.ofMsg (LoadCollectBatches(Start()))
     | SelectCollectBatch seedBase ->
@@ -755,15 +766,18 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     | RunCollectBatch call ->
         match call with
         | Start request ->
-            {
-                model with
-                    Collect = {
-                        model.Collect with
-                            CollectResult = model.Collect.CollectResult.StartLoading()
-                            Error = None
-                    }
-            },
-            runCollectBatchCmd request
+            match model.Collect.CollectResult with
+            | Loading _ -> model, Cmd.none
+            | _ ->
+                {
+                    model with
+                        Collect = {
+                            model.Collect with
+                                CollectResult = model.Collect.CollectResult.StartLoading()
+                                Error = None
+                        }
+                },
+                runCollectBatchCmd request
         | Finished resultValue ->
             match resultValue with
             | Ok collected ->
