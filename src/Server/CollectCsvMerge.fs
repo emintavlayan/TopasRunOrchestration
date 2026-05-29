@@ -16,6 +16,13 @@ type ParsedMergeCsv = {
 /// Splits one csv line into comma-separated columns.
 let private splitCsvLine (line: string) : string array = line.Split(',')
 
+/// Returns one UTC timestamp string used by collect csv merge logs.
+let private mergeLogTimestampUtc () : string = DateTime.UtcNow.ToString("O")
+
+/// Writes one collect csv merge stage log line to stdout.
+let private logCollectMergeStage (stage: string) (message: string) : unit =
+    Console.WriteLine($"[{mergeLogTimestampUtc()}] [CollectCsvMerge] [{stage}] {message}")
+
 /// Returns true when the value can be parsed as a floating-point number.
 let private tryParseFloat (value: string) : bool =
     let mutable parsed = 0.0
@@ -62,23 +69,30 @@ let private isDoseColumnNumericAcrossRows (doseColumnIndex: int) (rows: string a
     rows
     |> List.forall (fun row -> doseColumnIndex < row.Length && tryParseFloat row[doseColumnIndex])
 
+/// Appends one parsed csv line into header or data buffers.
+let private appendParsedLine
+    (headerLines: ResizeArray<string>)
+    (dataRows: ResizeArray<string array>)
+    (line: string)
+    : unit =
+    let columns = splitCsvLine line
+
+    match lastNumericColumnIndex columns with
+    | Some _ -> dataRows.Add columns
+    | None -> headerLines.Add line
+
 /// Parses csv text into header lines, data rows, and dose column index.
 let parseCsvForMerge (csvText: string) : Result<ParsedMergeCsv, string> =
     let lines =
         csvText.Replace("\r\n", "\n").Split('\n', StringSplitOptions.None)
-        |> Array.toList
-        |> List.filter (fun line -> not (String.IsNullOrWhiteSpace line))
+        |> Array.filter (fun line -> not (String.IsNullOrWhiteSpace line))
 
-    let headerLines, dataRows =
-        lines
-        |> List.fold
-            (fun (headers, rows) line ->
-                let columns = splitCsvLine line
+    let headerBuffer = ResizeArray<string>()
+    let dataBuffer = ResizeArray<string array>()
+    lines |> Array.iter (appendParsedLine headerBuffer dataBuffer)
 
-                match lastNumericColumnIndex columns with
-                | Some _ -> headers, rows @ [ columns ]
-                | None -> headers @ [ line ], rows)
-            ([], [])
+    let headerLines = headerBuffer |> Seq.toList
+    let dataRows = dataBuffer |> Seq.toList
 
     match dataRows with
     | [] -> Error "CSV did not contain any numeric data rows."
@@ -250,9 +264,15 @@ let private buildMergedOutputRow (baseRow: string array) (doseColumnIndex: int) 
 /// Merges csv files for one phase-space and writes the merged csv output file.
 let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: string) : Result<unit, string> =
     result {
+        logCollectMergeStage
+            "Start"
+            $"inputCsvCount={inputCsvPaths.Length}; outputCsvPath={outputCsvPath}"
+
         let! parsedInputs =
             inputCsvPaths
             |> List.map (fun path -> result {
+                logCollectMergeStage "ReadParseInputStart" $"path={path}"
+
                 let! text =
                     try
                         File.ReadAllText path |> Ok
@@ -260,6 +280,7 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
                         Error $"Failed reading csv file '{path}': {ex.Message}"
 
                 let! parsed = parseCsvForMerge text
+                logCollectMergeStage "ReadParseInputEnd" $"path={path}; rowCount={parsed.DataRows.Length}"
                 return path, parsed
             })
             |> List.sequenceResultM
@@ -269,6 +290,7 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
         | (_, firstParsed) :: otherParsed ->
             let expectedRows = firstParsed.DataRows.Length
             let expectedCols = firstParsed.DataRows.Head.Length
+            logCollectMergeStage "FirstInputShape" $"rowCount={expectedRows}; columnCount={expectedCols}"
 
             do!
                 otherParsed
@@ -277,6 +299,7 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
                 |> Result.map (fun _ -> ())
 
             let parsedFiles = firstParsed :: (otherParsed |> List.map snd)
+            logCollectMergeStage "MergeRowsStart" $"rowCount={expectedRows}; fileCount={parsedFiles.Length}"
 
             let! mergedRows =
                 [ 0 .. expectedRows - 1 ]
@@ -293,6 +316,7 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
                     return buildMergedOutputRow baseRow firstParsed.DoseColumnIndex doseValues
                 })
                 |> List.sequenceResultM
+            logCollectMergeStage "MergeRowsEnd" $"mergedRowCount={mergedRows.Length}"
 
             let outputLines =
                 (buildMergedOutputHeaderLines firstParsed @ mergedRows)
@@ -300,12 +324,14 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
 
             do!
                 try
+                    logCollectMergeStage "WriteStart" $"outputCsvPath={outputCsvPath}"
                     let parentFolder = Path.GetDirectoryName outputCsvPath
 
                     if not (String.IsNullOrWhiteSpace parentFolder) then
                         Directory.CreateDirectory(parentFolder) |> ignore
 
                     File.WriteAllText(outputCsvPath, outputLines)
+                    logCollectMergeStage "WriteEnd" $"outputCsvPath={outputCsvPath}"
                     Ok()
                 with ex ->
                     Error $"Failed writing merged csv '{outputCsvPath}': {ex.Message}"
