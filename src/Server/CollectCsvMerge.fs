@@ -10,6 +10,7 @@ type ParsedMergeCsv = {
     HeaderLines: string list
     DataRows: string array list
     DoseColumnIndex: int
+    DoseColumnName: string option
 }
 
 /// Splits one csv line into comma-separated columns.
@@ -27,6 +28,40 @@ let private lastNumericColumnIndex (columns: string array) : int option =
     |> Array.choose (fun (index, value) -> if tryParseFloat value then Some index else None)
     |> Array.tryLast
 
+/// Returns normalized header token for case-insensitive matching.
+let private normalizeHeaderToken (value: string) : string =
+    value.Trim().ToLowerInvariant()
+
+/// Returns preferred dose header names in strict priority order.
+let private preferredDoseHeaderNames: string list =
+    [
+        "dose_sum_gy"
+        "dose_gy"
+        "dose"
+        "dose"
+        "dosetomedium"
+        "dose_to_medium"
+        "dose-to-medium"
+        "medium dose"
+    ]
+
+/// Tries to resolve dose column from header columns using preferred names.
+let private tryResolveDoseColumnFromHeader (headerColumns: string array) : (int * string) option =
+    let normalizedColumns =
+        headerColumns
+        |> Array.mapi (fun index name -> index, name, normalizeHeaderToken name)
+
+    preferredDoseHeaderNames
+    |> List.tryPick (fun preferred ->
+        normalizedColumns
+        |> Array.tryFind (fun (_, _, normalized) -> normalized = preferred)
+        |> Option.map (fun (index, originalName, _) -> index, originalName))
+
+/// Returns true when selected dose column is numeric across all data rows.
+let private isDoseColumnNumericAcrossRows (doseColumnIndex: int) (rows: string array list) : bool =
+    rows
+    |> List.forall (fun row -> doseColumnIndex < row.Length && tryParseFloat row[doseColumnIndex])
+
 /// Parses csv text into header lines, data rows, and dose column index.
 let parseCsvForMerge (csvText: string) : Result<ParsedMergeCsv, string> =
     let lines =
@@ -34,33 +69,65 @@ let parseCsvForMerge (csvText: string) : Result<ParsedMergeCsv, string> =
         |> Array.toList
         |> List.filter (fun line -> not (String.IsNullOrWhiteSpace line))
 
-    let folder =
+    let headerLines, dataRows =
         lines
         |> List.fold
-            (fun (headers, dataRows, doseIndex) line ->
+            (fun (headers, rows) line ->
                 let columns = splitCsvLine line
 
                 match lastNumericColumnIndex columns with
-                | Some index ->
-                    let chosenDoseIndex =
-                        match doseIndex with
-                        | Some existing -> existing
-                        | None -> index
+                | Some _ -> headers, rows @ [ columns ]
+                | None -> headers @ [ line ], rows)
+            ([], [])
 
-                    headers, dataRows @ [ columns ], Some chosenDoseIndex
-                | None -> headers @ [ line ], dataRows, doseIndex)
-            ([], [], None)
+    match dataRows with
+    | [] -> Error "CSV did not contain any numeric data rows."
+    | firstRow :: _ ->
+        let expectedColumnCount = firstRow.Length
 
-    match folder with
-    | _, [], _ -> Error "CSV did not contain any numeric data rows."
-    | headerLines, dataRows, Some doseColumnIndex ->
-        Ok
-            {
-                HeaderLines = headerLines
-                DataRows = dataRows
-                DoseColumnIndex = doseColumnIndex
-            }
-    | _ -> Error "CSV dose column could not be determined."
+        if dataRows |> List.exists (fun row -> row.Length <> expectedColumnCount) then
+            Error "CSV column count mismatch in one or more data rows."
+        else
+            let usableHeaderColumns =
+                match headerLines |> List.tryLast with
+                | Some lastHeaderLine ->
+                    let columns = splitCsvLine lastHeaderLine
+
+                    if columns.Length = expectedColumnCount then Some columns else None
+                | None -> None
+
+            match usableHeaderColumns with
+            | Some headerColumns ->
+                match tryResolveDoseColumnFromHeader headerColumns with
+                | Some(doseColumnIndex, doseColumnName) ->
+                    if isDoseColumnNumericAcrossRows doseColumnIndex dataRows then
+                        Ok
+                            {
+                                HeaderLines = headerLines
+                                DataRows = dataRows
+                                DoseColumnIndex = doseColumnIndex
+                                DoseColumnName = Some doseColumnName
+                            }
+                    else
+                        Error $"Resolved dose column '{doseColumnName}' is not numeric across all rows."
+                | None ->
+                    let headerText = headerColumns |> Array.map _.Trim() |> String.concat ", "
+                    Error $"Unable to locate dose column from header. Header columns: {headerText}"
+            | None ->
+                // Fallback: when no usable header exists, keep legacy behavior and use the last numeric column.
+                match lastNumericColumnIndex firstRow with
+                | Some doseColumnIndex ->
+                    if isDoseColumnNumericAcrossRows doseColumnIndex dataRows then
+                        Ok
+                            {
+                                HeaderLines = headerLines
+                                DataRows = dataRows
+                                DoseColumnIndex = doseColumnIndex
+                                DoseColumnName = None
+                            }
+                    else
+                        Error "Fallback dose column is not numeric across all rows."
+                | None -> Error "CSV dose column could not be determined."
 
 /// Validates that parsed csv rows align with the first parsed file structure.
 let private validateSameShape
