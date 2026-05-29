@@ -142,68 +142,160 @@ let private validateSameShape
     else
         Ok()
 
-/// Merges parsed csv data rows by summing the dose column for each row.
-let private mergeDoseColumnRows
-    (doseColumnIndex: int)
-    (baseRows: string array list)
-    (otherFilesRows: (string array list) list)
-    : Result<string array list, string> =
-    try
-        let mergedRows =
-            [ 0 .. baseRows.Length - 1 ]
-            |> List.map (fun rowIndex ->
-                let baseRow = baseRows[rowIndex] |> Array.copy
+/// Represents node-level dose statistics for one merged voxel row.
+type private NodeDoseStats = {
+    Sum: float
+    Mean: float
+    StandardDeviation: float
+    StandardError: float
+    RelativeStandardErrorPercent: float
+    Count: int
+}
 
-                let sumDose =
-                    otherFilesRows
-                    |> List.fold
-                        (fun acc rows ->
-                            let value = rows[rowIndex].[doseColumnIndex].Trim()
-                            acc + Double.Parse(value, CultureInfo.InvariantCulture))
-                        (Double.Parse(baseRow[doseColumnIndex].Trim(), CultureInfo.InvariantCulture))
+/// Parses one dose cell value using invariant culture.
+let private parseDoseCell (value: string) : Result<float, string> =
+    let mutable parsed = 0.0
 
-                baseRow[doseColumnIndex] <- sumDose.ToString("G17", CultureInfo.InvariantCulture)
-                baseRow)
+    if Double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, &parsed) then
+        Ok parsed
+    else
+        Error $"Failed parsing dose value '{value}'."
 
-        Ok mergedRows
-    with ex ->
-        Error $"Failed merging dose column values: {ex.Message}"
+/// Returns sample standard deviation for node dose values.
+let private sampleStandardDeviation (values: float list) (mean: float) : float =
+    match values with
+    | []
+    | [ _ ] -> 0.0
+    | _ ->
+        let sumSquares = values |> List.sumBy (fun value -> pown (value - mean) 2)
+        sqrt (sumSquares / float (values.Length - 1))
+
+/// Returns zero when a value is NaN or infinity.
+let private finiteOrZero (value: float) : float =
+    if Double.IsNaN value || Double.IsInfinity value then 0.0 else value
+
+/// Computes node-level dose statistics for one merged voxel row.
+let private computeNodeDoseStats (doseValues: float list) : NodeDoseStats =
+    let count = doseValues.Length
+    let sumDose = doseValues |> List.sum
+    let meanDose = if count = 0 then 0.0 else sumDose / float count
+    let sdDose = sampleStandardDeviation doseValues meanDose
+    let semDose = if count < 2 then 0.0 else sdDose / sqrt (float count)
+
+    let relSemPercent =
+        if meanDose = 0.0 then
+            0.0
+        else
+            100.0 * semDose / abs meanDose
+
+    {
+        Sum = finiteOrZero sumDose
+        Mean = finiteOrZero meanDose
+        StandardDeviation = finiteOrZero sdDose
+        StandardError = finiteOrZero semDose
+        RelativeStandardErrorPercent = finiteOrZero relSemPercent
+        Count = count
+    }
+
+/// Formats one floating-point value using invariant culture.
+let private formatFloat (value: float) : string =
+    finiteOrZero value
+    |> fun safeValue -> safeValue.ToString("G17", CultureInfo.InvariantCulture)
+
+/// Builds merged output header lines with node diagnostic columns.
+let private buildMergedOutputHeaderLines (parsed: ParsedMergeCsv) : string list =
+    match parsed.HeaderLines with
+    | [] -> []
+    | headerLines ->
+        let lastLine = headerLines |> List.last
+        let lastColumns = splitCsvLine lastLine
+
+        if lastColumns.Length = parsed.DataRows.Head.Length then
+            let prefixLines = headerLines |> List.take (headerLines.Length - 1)
+
+            let preservedColumns =
+                lastColumns
+                |> Array.mapi (fun index value -> index, value)
+                |> Array.choose (fun (index, value) -> if index = parsed.DoseColumnIndex then None else Some value)
+                |> String.concat ","
+
+            prefixLines
+            @ [
+                $"{preservedColumns},dose_sum_Gy,dose_mean_node_Gy,dose_sd_node_Gy,dose_sem_node_Gy,dose_rel_sem_node_percent,node_count"
+              ]
+        else
+            headerLines
+
+/// Builds one merged output row preserving non-dose columns and appending node diagnostics.
+let private buildMergedOutputRow (baseRow: string array) (doseColumnIndex: int) (doseValues: float list) : string =
+    let preservedColumns =
+        baseRow
+        |> Array.mapi (fun index value -> index, value)
+        |> Array.choose (fun (index, value) -> if index = doseColumnIndex then None else Some value)
+        |> Array.toList
+
+    let stats = computeNodeDoseStats doseValues
+
+    [
+        yield! preservedColumns
+        formatFloat stats.Sum
+        formatFloat stats.Mean
+        formatFloat stats.StandardDeviation
+        formatFloat stats.StandardError
+        formatFloat stats.RelativeStandardErrorPercent
+        string stats.Count
+    ]
+    |> String.concat ","
 
 /// Merges csv files for one phase-space and writes the merged csv output file.
 let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: string) : Result<unit, string> =
     result {
-        match inputCsvPaths with
-        | [] -> return! Error "No input csv files were provided for merge."
-        | firstPath :: otherPaths ->
-            let! firstText =
-                try
-                    File.ReadAllText firstPath |> Ok
-                with ex ->
-                    Error $"Failed reading csv file '{firstPath}': {ex.Message}"
+        let! parsedInputs =
+            inputCsvPaths
+            |> List.map (fun path -> result {
+                let! text =
+                    try
+                        File.ReadAllText path |> Ok
+                    with ex ->
+                        Error $"Failed reading csv file '{path}': {ex.Message}"
 
-            let! firstParsed = parseCsvForMerge firstText
+                let! parsed = parseCsvForMerge text
+                return path, parsed
+            })
+            |> List.sequenceResultM
+
+        match parsedInputs with
+        | [] -> return! Error "No input csv files were provided for merge."
+        | (_, firstParsed) :: otherParsed ->
             let expectedRows = firstParsed.DataRows.Length
             let expectedCols = firstParsed.DataRows.Head.Length
 
-            let! parsedOthers =
-                otherPaths
-                |> List.map (fun path -> result {
-                    let! text =
-                        try
-                            File.ReadAllText path |> Ok
-                        with ex ->
-                            Error $"Failed reading csv file '{path}': {ex.Message}"
+            do!
+                otherParsed
+                |> List.map (fun (_, parsed) -> validateSameShape expectedRows expectedCols parsed.DataRows)
+                |> List.sequenceResultM
+                |> Result.map (fun _ -> ())
 
-                    let! parsed = parseCsvForMerge text
-                    do! validateSameShape expectedRows expectedCols parsed.DataRows
-                    return parsed.DataRows
+            let parsedFiles = firstParsed :: (otherParsed |> List.map snd)
+
+            let! mergedRows =
+                [ 0 .. expectedRows - 1 ]
+                |> List.map (fun rowIndex -> result {
+                    let baseRow = firstParsed.DataRows[rowIndex]
+
+                    let! doseValues =
+                        parsedFiles
+                        |> List.map (fun parsed ->
+                            let value = parsed.DataRows[rowIndex][parsed.DoseColumnIndex]
+                            parseDoseCell value)
+                        |> List.sequenceResultM
+
+                    return buildMergedOutputRow baseRow firstParsed.DoseColumnIndex doseValues
                 })
                 |> List.sequenceResultM
 
-            let! mergedRows = mergeDoseColumnRows firstParsed.DoseColumnIndex firstParsed.DataRows parsedOthers
-
             let outputLines =
-                (firstParsed.HeaderLines @ (mergedRows |> List.map (fun row -> String.concat "," row)))
+                (buildMergedOutputHeaderLines firstParsed @ mergedRows)
                 |> String.concat Environment.NewLine
 
             do!
