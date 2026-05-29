@@ -177,19 +177,39 @@ type MissingCollectFile = {
     Path: string
 }
 
+type CollectFileIssue = {
+    RunId: string
+    PhaseSpaceIndex: string
+    NodeDigit: string
+    FileKind: string
+    Path: string
+    Problem: string
+    Message: string option
+}
+
 type CollectPreflightResult = {
     SeedBase: string
     CanCollect: bool
     ExpectedRunCount: int
+    EffectiveRunCount: int
+    EffectivePhaseSpaceCount: int
+    EffectiveNodeCount: int
     FoundCsvCount: int
     MissingCsvCount: int
     FoundLogCount: int
     MissingLogCount: int
+    ExcludedPhaseSpaceIndexes: string list
+    ExcludedNodeDigits: string list
     Checks: CollectPreflightCheck list
     MissingFiles: MissingCollectFile list
+    FileIssues: CollectFileIssue list
 }
 
-type CollectPreviewRequest = { SeedBase: string }
+type CollectPreviewRequest = {
+    SeedBase: string
+    ExcludedPhaseSpaceIndexes: string list
+    ExcludedNodeDigits: string list
+}
 
 type CollectPreviewResult = {
     SeedBase: string
@@ -203,7 +223,11 @@ type CollectPreviewResult = {
     Preflight: CollectPreflightResult
 }
 
-type CollectRequest = { SeedBase: string }
+type CollectRequest = {
+    SeedBase: string
+    ExcludedPhaseSpaceIndexes: string list
+    ExcludedNodeDigits: string list
+}
 
 type CollectedPhaseSpaceResult = {
     PhaseSpaceIndex: string
