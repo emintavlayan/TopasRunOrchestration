@@ -1,6 +1,7 @@
 module Server.Tests.CollectTests
 
 open System
+open System.Globalization
 open System.IO
 open Microsoft.Data.Sqlite
 open Xunit
@@ -89,12 +90,22 @@ let ``Collect merge sums final numeric dose column`` () =
         let a = Path.Combine(folder, "node1.csv")
         let b = Path.Combine(folder, "node2.csv")
         let output = Path.Combine(folder, "phsp01_merged.csv")
-        File.WriteAllText(a, "x,y,dose\n0,0,1\n0,1,2")
-        File.WriteAllText(b, "x,y,dose\n0,0,3\n0,1,4")
+        File.WriteAllText(a, "x,y,z,dose_Gy\n0,0,0,1\n0,1,0,2")
+        File.WriteAllText(b, "x,y,z,dose_Gy\n0,0,0,3\n0,1,0,4")
         assertOk (mergeNodeCsvFilesForPhaseSpace [ a; b ] output) |> ignore
-        let merged = File.ReadAllText(output)
-        Assert.Contains("0,0,4", merged)
-        Assert.Contains("0,1,6", merged)
+        let lines = File.ReadAllLines(output)
+        Assert.Equal("x,y,z,dose_sum_Gy,dose_mean_node_Gy,dose_sd_node_Gy,dose_sem_node_Gy,dose_rel_sem_node_percent,node_count", lines[0])
+
+        let row = lines[1].Split(',')
+        Assert.Equal("0", row[0])
+        Assert.Equal("0", row[1])
+        Assert.Equal("0", row[2])
+        Assert.Equal(4.0, Double.Parse(row[3], CultureInfo.InvariantCulture))
+        Assert.Equal(2.0, Double.Parse(row[4], CultureInfo.InvariantCulture))
+        Assert.Equal(1.4142135623730951, Double.Parse(row[5], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(1.0, Double.Parse(row[6], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(50.0, Double.Parse(row[7], CultureInfo.InvariantCulture), 12)
+        Assert.Equal("2", row[8])
     finally
         cleanupTestDirectory folder
 
@@ -126,14 +137,24 @@ let ``Collect statistics computes mean median sd count`` () =
         let b = Path.Combine(folder, "phsp02.csv")
         let c = Path.Combine(folder, "phsp03.csv")
         let summary = Path.Combine(folder, "dose_summary.csv")
-        File.WriteAllText(a, "x,y,dose\n0,0,1\n0,1,2")
-        File.WriteAllText(b, "x,y,dose\n0,0,3\n0,1,4")
-        File.WriteAllText(c, "x,y,dose\n0,0,5\n0,1,6")
+        File.WriteAllText(a, "x,y,z,dose_sum_Gy\n0,0,0,1\n0,1,0,2")
+        File.WriteAllText(b, "x,y,z,dose_sum_Gy\n0,0,0,3\n0,1,0,4")
+        File.WriteAllText(c, "x,y,z,dose_sum_Gy\n0,0,0,5\n0,1,0,6")
         assertOk (computeDoseSummary [ a; b; c ] summary) |> ignore
         let lines = File.ReadAllLines(summary)
-        Assert.Equal("x,y,mean,median,standard_deviation,count", lines[0])
-        Assert.Contains(",3,3,2,3", lines[1])
-        Assert.Contains(",4,4,2,3", lines[2])
+        Assert.Equal("x,y,z,total_dose_sum_Gy,phsp_mean_Gy,phsp_median_Gy,phsp_sd_Gy,phsp_sem_Gy,phsp_rel_sem_percent,phsp_count", lines[0])
+
+        let row = lines[1].Split(',')
+        Assert.Equal("0", row[0])
+        Assert.Equal("0", row[1])
+        Assert.Equal("0", row[2])
+        Assert.Equal(9.0, Double.Parse(row[3], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(3.0, Double.Parse(row[4], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(3.0, Double.Parse(row[5], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(2.0, Double.Parse(row[6], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(1.1547005383792515, Double.Parse(row[7], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(38.490017945975058, Double.Parse(row[8], CultureInfo.InvariantCulture), 12)
+        Assert.Equal("3", row[9])
     finally
         cleanupTestDirectory folder
 
@@ -146,8 +167,8 @@ let ``Collect statistics fails on mismatched row counts`` () =
         let a = Path.Combine(folder, "phsp01.csv")
         let b = Path.Combine(folder, "phsp02.csv")
         let summary = Path.Combine(folder, "dose_summary.csv")
-        File.WriteAllText(a, "x,y,dose\n0,0,1\n0,1,2")
-        File.WriteAllText(b, "x,y,dose\n0,0,3")
+        File.WriteAllText(a, "x,y,z,dose_sum_Gy\n0,0,0,1\n0,1,0,2")
+        File.WriteAllText(b, "x,y,z,dose_sum_Gy\n0,0,0,3")
         Assert.True(Result.isError (computeDoseSummary [ a; b ] summary))
     finally
         cleanupTestDirectory folder
@@ -190,7 +211,7 @@ let ``Collect operation writes outputs and updates status`` () =
         Assert.Equal("Collected", result.Status)
         let outputFolder = Path.Combine(appRoot, "outputs", "1001")
         Assert.True(File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv")))
-        Assert.True(File.Exists(Path.Combine(outputFolder, "phsp01_merged.csv")))
+        Assert.True(File.Exists(Path.Combine(outputFolder, "merged", "phsp01_merged.csv")))
         Assert.True(File.Exists(Path.Combine(outputFolder, "dose_summary.csv")))
 
         use statusCommand = conn.CreateCommand()
