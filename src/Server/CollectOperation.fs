@@ -194,7 +194,7 @@ let preflightCollect (settings: TsebtSettings) (seedBase: string) : Result<Colle
 
         result {
             let! rows = readCollectRunRows connection seedBase
-            return buildCollectPreflightResult settings seedBase rows
+            return buildCollectPreflightResult settings seedBase rows [] []
         }
     with ex ->
         Error $"Failed running collect preflight: {ex.Message}"
@@ -207,17 +207,26 @@ let previewCollect (settings: TsebtSettings) (request: CollectPreviewRequest) : 
 
         result {
             let! rows = readCollectRunRows connection request.SeedBase
-            let preflight = buildCollectPreflightResult settings request.SeedBase rows
+            let effectiveRows =
+                applyCollectExclusions rows request.ExcludedPhaseSpaceIndexes request.ExcludedNodeDigits
+
+            let preflight =
+                buildCollectPreflightResult
+                    settings
+                    request.SeedBase
+                    rows
+                    request.ExcludedPhaseSpaceIndexes
+                    request.ExcludedNodeDigits
             let outputFolder = outputFolderPath settings request.SeedBase
 
             return
                 {
                     SeedBase = request.SeedBase
                     ExpectedRunCount = preflight.ExpectedRunCount
-                    PhaseSpaceCount = rows |> List.map _.PhaseSpaceIndex |> List.distinct |> List.length
-                    NodeCount = rows |> List.map _.NodeDigit |> List.distinct |> List.length
+                    PhaseSpaceCount = effectiveRows |> List.map _.PhaseSpaceIndex |> List.distinct |> List.length
+                    NodeCount = effectiveRows |> List.map _.NodeDigit |> List.distinct |> List.length
                     OutputFolder = outputFolder
-                    PlannedMergedFiles = plannedMergedFiles settings request.SeedBase rows
+                    PlannedMergedFiles = plannedMergedFiles settings request.SeedBase effectiveRows
                     FinalSummaryPath = plannedSummaryPath settings request.SeedBase
                     ManifestPath = plannedManifestPath settings request.SeedBase
                     Preflight = preflight
@@ -351,11 +360,20 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
                 return! Error $"Batch {request.SeedBase} has already been collected."
 
             let! rows = readCollectRunRows connection request.SeedBase
-            let preflight = buildCollectPreflightResult settings request.SeedBase rows
+            let effectiveRows =
+                applyCollectExclusions rows request.ExcludedPhaseSpaceIndexes request.ExcludedNodeDigits
+
+            let preflight =
+                buildCollectPreflightResult
+                    settings
+                    request.SeedBase
+                    rows
+                    request.ExcludedPhaseSpaceIndexes
+                    request.ExcludedNodeDigits
             logCollectStage
                 request.SeedBase
                 "Preflight"
-                $"expectedRuns={preflight.ExpectedRunCount}; csvFound={preflight.FoundCsvCount}; csvMissing={preflight.MissingCsvCount}; logFound={preflight.FoundLogCount}; logMissing={preflight.MissingLogCount}; canCollect={preflight.CanCollect}"
+                $"expectedRuns={preflight.ExpectedRunCount}; effectiveRuns={preflight.EffectiveRunCount}; effectivePhaseSpaces={preflight.EffectivePhaseSpaceCount}; effectiveNodes={preflight.EffectiveNodeCount}; csvFound={preflight.FoundCsvCount}; csvMissing={preflight.MissingCsvCount}; logFound={preflight.FoundLogCount}; logMissing={preflight.MissingLogCount}; canCollect={preflight.CanCollect}"
 
             if not preflight.CanCollect then
                 return! Error $"Collect preflight failed for seed base: {request.SeedBase}"
@@ -363,14 +381,14 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
             let outputFolder = outputFolderPath settings request.SeedBase
             let summaryPath = plannedSummaryPath settings request.SeedBase
             let manifestPath = plannedManifestPath settings request.SeedBase
-            let plannedMergedFilesList = plannedMergedFiles settings request.SeedBase rows
+            let plannedMergedFilesList = plannedMergedFiles settings request.SeedBase effectiveRows
 
             do! validateCollectOutputCollisions plannedMergedFilesList summaryPath
             logCollectStage request.SeedBase "CollisionValidation" "Output collision validation passed."
 
             logCollectStage request.SeedBase "MergeStart" "Starting phase-space CSV merge."
 
-            let! mergedFiles = mergePhaseSpaceCsvFiles settings request.SeedBase rows
+            let! mergedFiles = mergePhaseSpaceCsvFiles settings request.SeedBase effectiveRows
             let mergedPaths = mergedFiles |> List.map _.MergedFilePath
 
             logCollectStage
@@ -382,7 +400,7 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
             do! computeDoseSummary mergedPaths summaryPath
             logCollectStage request.SeedBase "SummaryEnd" $"Dose summary written: {summaryPath}"
 
-            let manifestLines = buildCollectManifestLines rows
+            let manifestLines = buildCollectManifestLines effectiveRows
             logCollectStage request.SeedBase "ManifestWriteStart" $"Writing collect manifest: {manifestPath}"
             do! writeCollectManifest manifestPath manifestLines
             logCollectStage request.SeedBase "ManifestWriteEnd" $"Collect manifest written: {manifestPath}"
@@ -397,7 +415,7 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
             return
                 {
                     SeedBase = request.SeedBase
-                    ExpectedRunCount = preflight.ExpectedRunCount
+                    ExpectedRunCount = preflight.EffectiveRunCount
                     CsvReadCount = preflight.FoundCsvCount
                     LogFoundCount = preflight.FoundLogCount
                     MergedPhaseSpaceCount = mergedFiles.Length

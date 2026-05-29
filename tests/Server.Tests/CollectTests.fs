@@ -149,13 +149,13 @@ let ``Collect preview supports excluding failed phase-space or node`` () =
         for (_, _, _, inputPath, _) in rows do
             File.WriteAllText(inputPath, "input")
 
-        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1")
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,z,dose\n0,0,0,1")
         File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
-        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,dose\n0,0,2")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,z,dose\n0,0,0,2")
         File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
         File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.csv"), "")
         File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.log"), "does not support particle ID")
-        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.csv"), "x,y,dose\n0,0,4")
+        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.csv"), "x,y,z,dose\n0,0,0,4")
         File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.log"), "ok")
 
         let strictPreview =
@@ -353,5 +353,71 @@ let ``Collect operation writes outputs and updates status`` () =
         statusCommand.CommandText <- "SELECT collect_status FROM generated_batches WHERE seed_base = '1001';"
         let status = string (statusCommand.ExecuteScalar())
         Assert.Equal("Collected", status)
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
+let ``Collect operation applies phase-space exclusions to merge and manifest`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-op-exclude-phsp-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        assertOk (initialize settings) |> ignore
+
+        let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+        let runFolder = Path.Combine(appRoot, "runs", "1001")
+        Directory.CreateDirectory(inputFolder) |> ignore
+        Directory.CreateDirectory(runFolder) |> ignore
+
+        let rows = [
+            ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
+            ("seed10012_phsp01", "01", "2", Path.Combine(inputFolder, "seed10012_phsp01.txt"), Path.Combine(runFolder, "seed10012_phsp01"))
+            ("seed10013_phsp20", "20", "1", Path.Combine(inputFolder, "seed10013_phsp20.txt"), Path.Combine(runFolder, "seed10013_phsp20"))
+            ("seed10014_phsp20", "20", "2", Path.Combine(inputFolder, "seed10014_phsp20.txt"), Path.Combine(runFolder, "seed10014_phsp20"))
+        ]
+
+        let dbPath = Path.Combine(appRoot, "database", "app.db")
+        let csb = SqliteConnectionStringBuilder()
+        csb.DataSource <- dbPath
+        use conn = new SqliteConnection(csb.ConnectionString)
+        conn.Open()
+        seedGeneratedBatch conn "1001" rows
+
+        for (_, _, _, inputPath, _) in rows do
+            File.WriteAllText(inputPath, "input")
+
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,z,dose\n0,0,0,1")
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,z,dose\n0,0,0,2")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.csv"), "")
+        File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.log"), "does not support particle ID")
+        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.csv"), "x,y,z,dose\n0,0,0,4")
+        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.log"), "ok")
+
+        let result =
+            assertOk (
+                collectBatch
+                    settings
+                    {
+                        SeedBase = "1001"
+                        ExcludedPhaseSpaceIndexes = [ "20" ]
+                        ExcludedNodeDigits = []
+                    }
+            )
+
+        Assert.Equal("Collected", result.Status)
+        Assert.Equal(2, result.ExpectedRunCount)
+        Assert.Equal(1, result.MergedPhaseSpaceCount)
+
+        let outputFolder = Path.Combine(appRoot, "outputs", "1001")
+        Assert.True(File.Exists(Path.Combine(outputFolder, "merged", "phsp01_merged.csv")))
+        Assert.False(File.Exists(Path.Combine(outputFolder, "merged", "phsp20_merged.csv")))
+
+        let manifestLines = File.ReadAllLines(Path.Combine(outputFolder, "collect_manifest.tsv"))
+        Assert.Equal(3, manifestLines.Length)
+        Assert.DoesNotContain(manifestLines, (fun line -> line.Contains("phsp20")))
     finally
         cleanupTestDirectory appRoot
