@@ -34,6 +34,10 @@ type private StreamingMergeSource = {
 /// Splits one csv line into comma-separated columns.
 let private splitCsvLine (line: string) : string array = line.Split(',')
 
+/// Returns true when one csv line should be ignored by parsers.
+let private isIgnoredCsvLine (line: string) : bool =
+    String.IsNullOrWhiteSpace line || line.TrimStart().StartsWith("#", StringComparison.Ordinal)
+
 /// Returns one UTC timestamp string used by collect csv merge logs.
 let private mergeLogTimestampUtc () : string = DateTime.UtcNow.ToString("O")
 
@@ -99,7 +103,7 @@ let private isDoseColumnNumericAcrossRows (doseColumnIndex: int) (rows: string a
 let parseCsvForMerge (csvText: string) : Result<ParsedMergeCsv, string> =
     let lines =
         csvText.Replace("\r\n", "\n").Split('\n', StringSplitOptions.None)
-        |> Array.filter (fun line -> not (String.IsNullOrWhiteSpace line))
+        |> Array.filter (fun line -> not (isIgnoredCsvLine line))
 
     let headerBuffer = ResizeArray<string>()
     let dataBuffer = ResizeArray<string array>()
@@ -180,7 +184,7 @@ let private tryReadNextNonBlankRow (reader: StreamReader) : string array option 
     while continueReading && not reader.EndOfStream do
         let line = reader.ReadLine()
 
-        if not (isNull line) && not (String.IsNullOrWhiteSpace line) then
+        if not (isNull line) && not (isIgnoredCsvLine line) then
             nextRow <- Some(splitCsvLine line)
             continueReading <- false
 
@@ -198,7 +202,7 @@ let private readHeaderAndFirstDataRow
     while continueReading && not reader.EndOfStream do
         let line = reader.ReadLine()
 
-        if not (isNull line) && not (String.IsNullOrWhiteSpace line) then
+        if not (isNull line) && not (isIgnoredCsvLine line) then
             let columns = splitCsvLine line
 
             match lastNumericColumnIndex columns with
@@ -282,33 +286,9 @@ let private readNextDataRow (source: StreamingMergeSource) : string array option
         Some pending
     | None -> tryReadNextNonBlankRow source.Reader
 
-/// Builds merged output header lines with node diagnostic columns.
-let private buildMergedOutputHeaderLines
-    (headerLines: string list)
-    (dataColumnCount: int)
-    (doseColumnIndex: int)
-    : string list =
-    match headerLines with
-    | [] -> []
-    | _ ->
-        let lastLine = headerLines |> List.last
-        let lastColumns = splitCsvLine lastLine
-
-        if lastColumns.Length = dataColumnCount then
-            let prefixLines = headerLines |> List.take (headerLines.Length - 1)
-
-            let preservedColumns =
-                lastColumns
-                |> Array.mapi (fun index value -> index, value)
-                |> Array.choose (fun (index, value) -> if index = doseColumnIndex then None else Some value)
-                |> String.concat ","
-
-            prefixLines
-            @ [
-                $"{preservedColumns},dose_sum_Gy,dose_mean_node_Gy,dose_sd_node_Gy,dose_sem_node_Gy,dose_rel_sem_node_percent,node_count"
-              ]
-        else
-            headerLines
+/// Builds merged output header lines with canonical coordinate and node diagnostic columns.
+let private buildMergedOutputHeaderLines () : string list =
+    [ "x,y,z,dose_sum_Gy,dose_mean_node_Gy,dose_sd_node_Gy,dose_sem_node_Gy,dose_rel_sem_node_percent,node_count" ]
 
 /// Computes sample standard deviation from count, sum, and sum-of-squares.
 let private sampleStandardDeviationFromMoments (count: int) (sum: float) (sumSquares: float) : float =
@@ -319,10 +299,23 @@ let private sampleStandardDeviationFromMoments (count: int) (sum: float) (sumSqu
         let variance = Math.Max(0.0, numerator / float (count - 1))
         sqrt variance
 
-/// Builds one merged output row preserving non-dose columns and appending node diagnostics.
+/// Extracts x,y,z coordinate values from the first three non-dose columns.
+let private extractCoordinateColumns (baseRow: string array) (doseColumnIndex: int) : Result<string * string * string, string> =
+    let coordinates =
+        baseRow
+        |> Array.mapi (fun index value -> index, value)
+        |> Array.choose (fun (index, value) -> if index = doseColumnIndex then None else Some value)
+
+    if coordinates.Length < 3 then
+        Error $"Input data row does not contain at least three non-dose coordinate columns. Found {coordinates.Length}."
+    else
+        Ok(coordinates[0], coordinates[1], coordinates[2])
+
+/// Builds one merged output row using x,y,z and appending node diagnostics.
 let private buildMergedOutputRow
-    (baseRow: string array)
-    (doseColumnIndex: int)
+    (xValue: string)
+    (yValue: string)
+    (zValue: string)
     (sumDose: float)
     (meanDose: float)
     (sdDose: float)
@@ -332,12 +325,9 @@ let private buildMergedOutputRow
     : string =
     let builder = StringBuilder()
 
-    for index in 0 .. baseRow.Length - 1 do
-        if index <> doseColumnIndex then
-            if builder.Length > 0 then
-                builder.Append(',') |> ignore
-
-            builder.Append(baseRow[index]) |> ignore
+    builder.Append(xValue) |> ignore
+    builder.Append(',').Append(yValue) |> ignore
+    builder.Append(',').Append(zValue) |> ignore
 
     builder.Append(',').Append(formatFloat sumDose) |> ignore
     builder.Append(',').Append(formatFloat meanDose) |> ignore
@@ -409,10 +399,7 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
                 use writer = new StreamWriter(outputCsvPath, false)
 
                 let outputHeaderLines =
-                    buildMergedOutputHeaderLines
-                        firstSource.HeaderLines
-                        firstSource.DataColumnCount
-                        firstSource.DoseColumnIndex
+                    buildMergedOutputHeaderLines ()
 
                 for headerLine in outputHeaderLines do
                     writer.WriteLine headerLine
@@ -483,6 +470,12 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
                             match parseError with
                             | Some errorMessage -> return! Error errorMessage
                             | None ->
+                                let! xValue, yValue, zValue =
+                                    match extractCoordinateColumns baseRow firstSource.DoseColumnIndex with
+                                    | Ok coordinates -> Ok coordinates
+                                    | Error message ->
+                                        Error $"Coordinate parse failed at row index {rowIndex}: {message}"
+
                                 let nodeCount = sources.Length
                                 let meanDose = sumDose / float nodeCount
                                 let sdDose = sampleStandardDeviationFromMoments nodeCount sumDose sumSquares
@@ -496,8 +489,9 @@ let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: 
 
                                 let mergedRow =
                                     buildMergedOutputRow
-                                        baseRow
-                                        firstSource.DoseColumnIndex
+                                        xValue
+                                        yValue
+                                        zValue
                                         sumDose
                                         meanDose
                                         sdDose

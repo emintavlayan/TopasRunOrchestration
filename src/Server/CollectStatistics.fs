@@ -19,17 +19,16 @@ type private StreamingSummarySource = {
 /// Splits one csv line into comma-separated columns.
 let private splitCsvLine (line: string) : string array = line.Split(',')
 
+/// Returns true when one csv line should be ignored by parsers.
+let private isIgnoredCsvLine (line: string) : bool =
+    String.IsNullOrWhiteSpace line || line.TrimStart().StartsWith("#", StringComparison.Ordinal)
+
 /// Returns one UTC timestamp string used by collect summary logs.
 let private summaryLogTimestampUtc () : string = DateTime.UtcNow.ToString("O")
 
 /// Writes one collect summary stage log line to stdout.
 let private logCollectSummaryStage (stage: string) (message: string) : unit =
     Console.WriteLine($"[{summaryLogTimestampUtc()}] [CollectStatistics] [{stage}] {message}")
-
-/// Returns true when the value can be parsed as a floating-point number.
-let private tryParseFloat (value: string) : bool =
-    let mutable parsed = 0.0
-    Double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, &parsed)
 
 /// Parses one floating-point value using invariant culture.
 let private parseFloat (value: string) : Result<float, string> =
@@ -52,36 +51,36 @@ let private tryReadNextNonBlankRow (reader: StreamReader) : string array option 
     while continueReading && not reader.EndOfStream do
         let line = reader.ReadLine()
 
-        if not (isNull line) && not (String.IsNullOrWhiteSpace line) then
+        if not (isNull line) && not (isIgnoredCsvLine line) then
             nextRow <- Some(splitCsvLine line)
             continueReading <- false
 
     nextRow
 
-/// Reads header lines and the first numeric data row from one csv stream.
+/// Reads one real csv header line and first data row from one merged csv stream.
 let private readHeaderAndFirstDataRow
     (reader: StreamReader)
     (path: string)
     : Result<string list * string array, string> =
-    let headers = ResizeArray<string>()
+    let mutable headerLine: string option = None
     let mutable firstDataRow: string array option = None
-    let mutable continueReading = true
 
-    while continueReading && not reader.EndOfStream do
+    while headerLine.IsNone && not reader.EndOfStream do
         let line = reader.ReadLine()
 
-        if not (isNull line) && not (String.IsNullOrWhiteSpace line) then
-            let columns = splitCsvLine line
+        if not (isNull line) && not (isIgnoredCsvLine line) then
+            headerLine <- Some line
 
-            if columns |> Array.exists tryParseFloat then
-                firstDataRow <- Some columns
-                continueReading <- false
-            else
-                headers.Add line
+    while firstDataRow.IsNone && not reader.EndOfStream do
+        let line = reader.ReadLine()
 
-    match firstDataRow with
-    | Some row -> Ok((headers |> Seq.toList), row)
-    | None -> Error $"CSV did not contain any numeric data rows: {path}"
+        if not (isNull line) && not (isIgnoredCsvLine line) then
+            firstDataRow <- Some(splitCsvLine line)
+
+    match headerLine, firstDataRow with
+    | Some header, Some row -> Ok([ header ], row)
+    | None, _ -> Error $"Merged csv header is missing in '{path}'."
+    | _, None -> Error $"Merged csv did not contain any data rows: {path}"
 
 /// Resolves dose_sum_Gy column index from a usable merged csv header.
 let private resolveDoseSumColumnIndexFromHeader
@@ -171,38 +170,27 @@ let private medianFromValues (values: float array) : float =
         let lower = sorted[(count / 2) - 1]
         (lower + upper) / 2.0
 
-/// Builds updated header lines with statistics column names.
-let private buildSummaryHeaders
-    (headerLines: string list)
-    (dataColumnCount: int)
-    (doseColumnIndex: int)
-    : string list =
-    match headerLines with
-    | [] -> []
-    | _ ->
-        let lastLine = headerLines |> List.last
-        let lastColumns = splitCsvLine lastLine
+/// Builds canonical summary output header line.
+let private buildSummaryHeaders () : string list =
+    [ "x,y,z,total_dose_sum_Gy,phsp_mean_Gy,phsp_median_Gy,phsp_sd_Gy,phsp_sem_Gy,phsp_rel_sem_percent,phsp_count" ]
 
-        if lastColumns.Length = dataColumnCount then
-            let prefix = headerLines |> List.take (headerLines.Length - 1)
+/// Extracts x,y,z coordinate values from the first three non-dose columns.
+let private extractCoordinateColumns (baseRow: string array) (doseColumnIndex: int) : Result<string * string * string, string> =
+    let coordinates =
+        baseRow
+        |> Array.mapi (fun index value -> index, value)
+        |> Array.choose (fun (index, value) -> if index = doseColumnIndex then None else Some value)
 
-            let nonDoseColumns =
-                lastColumns
-                |> Array.mapi (fun index value -> index, value)
-                |> Array.choose (fun (index, value) -> if index = doseColumnIndex then None else Some value)
-                |> String.concat ","
+    if coordinates.Length < 3 then
+        Error $"Input data row does not contain at least three non-dose coordinate columns. Found {coordinates.Length}."
+    else
+        Ok(coordinates[0], coordinates[1], coordinates[2])
 
-            prefix
-            @ [
-                $"{nonDoseColumns},total_dose_sum_Gy,phsp_mean_Gy,phsp_median_Gy,phsp_sd_Gy,phsp_sem_Gy,phsp_rel_sem_percent,phsp_count"
-              ]
-        else
-            headerLines
-
-/// Builds one summary output row preserving non-dose columns and appending summary statistics.
+/// Builds one summary output row using x,y,z and appending summary statistics.
 let private buildSummaryOutputRow
-    (baseRow: string array)
-    (doseColumnIndex: int)
+    (xValue: string)
+    (yValue: string)
+    (zValue: string)
     (totalDose: float)
     (meanDose: float)
     (medianDose: float)
@@ -213,12 +201,9 @@ let private buildSummaryOutputRow
     : string =
     let builder = StringBuilder()
 
-    for index in 0 .. baseRow.Length - 1 do
-        if index <> doseColumnIndex then
-            if builder.Length > 0 then
-                builder.Append(',') |> ignore
-
-            builder.Append(baseRow[index]) |> ignore
+    builder.Append(xValue) |> ignore
+    builder.Append(',').Append(yValue) |> ignore
+    builder.Append(',').Append(zValue) |> ignore
 
     builder.Append(',').Append(formatFloat totalDose) |> ignore
     builder.Append(',').Append(formatFloat meanDose) |> ignore
@@ -287,10 +272,7 @@ let computeDoseSummary (mergedCsvPaths: string list) (outputSummaryPath: string)
                 use writer = new StreamWriter(outputSummaryPath, false)
 
                 let summaryHeaders =
-                    buildSummaryHeaders
-                        firstSource.HeaderLines
-                        firstSource.DataColumnCount
-                        firstSource.DoseColumnIndex
+                    buildSummaryHeaders ()
 
                 for headerLine in summaryHeaders do
                     writer.WriteLine headerLine
@@ -351,6 +333,12 @@ let computeDoseSummary (mergedCsvPaths: string list) (outputSummaryPath: string)
                         match rowError with
                         | Some errorMessage -> return! Error errorMessage
                         | None ->
+                            let! xValue, yValue, zValue =
+                                match extractCoordinateColumns baseRow firstSource.DoseColumnIndex with
+                                | Ok coordinates -> Ok coordinates
+                                | Error message ->
+                                    Error $"Coordinate parse failed at row index {rowIndex}: {message}"
+
                             let phspCount = sources.Length
                             let meanDose = sumDose / float phspCount
                             let medianDose = medianFromValues values
@@ -365,8 +353,9 @@ let computeDoseSummary (mergedCsvPaths: string list) (outputSummaryPath: string)
 
                             let summaryRow =
                                 buildSummaryOutputRow
-                                    baseRow
-                                    firstSource.DoseColumnIndex
+                                    xValue
+                                    yValue
+                                    zValue
                                     sumDose
                                     meanDose
                                     medianDose

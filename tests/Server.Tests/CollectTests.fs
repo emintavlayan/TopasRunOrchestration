@@ -90,8 +90,8 @@ let ``Collect merge sums final numeric dose column`` () =
         let a = Path.Combine(folder, "node1.csv")
         let b = Path.Combine(folder, "node2.csv")
         let output = Path.Combine(folder, "phsp01_merged.csv")
-        File.WriteAllText(a, "x,y,z,dose_Gy\n0,0,0,1\n0,1,0,2")
-        File.WriteAllText(b, "x,y,z,dose_Gy\n0,0,0,3\n0,1,0,4")
+        File.WriteAllText(a, "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,1\n0,1,0,2")
+        File.WriteAllText(b, "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,3\n0,1,0,4")
         assertOk (mergeNodeCsvFilesForPhaseSpace [ a; b ] output) |> ignore
         let lines = File.ReadAllLines(output)
         Assert.Equal("x,y,z,dose_sum_Gy,dose_mean_node_Gy,dose_sd_node_Gy,dose_sem_node_Gy,dose_rel_sem_node_percent,node_count", lines[0])
@@ -202,8 +202,8 @@ let ``Collect operation writes outputs and updates status`` () =
 
         File.WriteAllText(Path.Combine(inputFolder, "seed10011_phsp01.txt"), "input")
         File.WriteAllText(Path.Combine(inputFolder, "seed10012_phsp01.txt"), "input")
-        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1")
-        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,dose\n0,0,2")
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,1")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,2")
         File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
         File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
 
@@ -213,6 +213,10 @@ let ``Collect operation writes outputs and updates status`` () =
         Assert.True(File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv")))
         Assert.True(File.Exists(Path.Combine(outputFolder, "merged", "phsp01_merged.csv")))
         Assert.True(File.Exists(Path.Combine(outputFolder, "dose_summary.csv")))
+        let mergedHeader = File.ReadLines(Path.Combine(outputFolder, "merged", "phsp01_merged.csv")) |> Seq.head
+        let summaryHeader = File.ReadLines(Path.Combine(outputFolder, "dose_summary.csv")) |> Seq.head
+        Assert.Equal("x,y,z,dose_sum_Gy,dose_mean_node_Gy,dose_sd_node_Gy,dose_sem_node_Gy,dose_rel_sem_node_percent,node_count", mergedHeader)
+        Assert.Equal("x,y,z,total_dose_sum_Gy,phsp_mean_Gy,phsp_median_Gy,phsp_sd_Gy,phsp_sem_Gy,phsp_rel_sem_percent,phsp_count", summaryHeader)
 
         use statusCommand = conn.CreateCommand()
         statusCommand.CommandText <- "SELECT collect_status FROM generated_batches WHERE seed_base = '1001';"
