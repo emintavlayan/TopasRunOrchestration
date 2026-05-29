@@ -13,6 +13,19 @@ open CollectStatistics
 open SqliteInit
 open Server
 
+/// Returns a synthetic TOPAS timing footer used for successful log health tests.
+let private successfulTopasFooter =
+    String.concat
+        "\n"
+        [
+            "Elapsed times:"
+            "Parameter Reading : User=0.000000s Real=0.002115s Sys=0.000000s [Cpu=0.0%]"
+            "    Initialization: User=0.030000s Real=0.040187s Sys=0.010000s [Cpu=99.5%]"
+            "         Execution: User=4.130000s Real=1.277396s Sys=0.160000s [Cpu=335.8%]"
+            "      Finalization: User=0.510000s Real=1.155505s Sys=0.620000s [Cpu=97.8%]"
+            "             Total: User=4.67s Real=2.4752s Sys=0.79s"
+        ]
+
 [<Fact>]
 let ``Collect preflight blocks missing csv and missing log`` () =
     let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-{Guid.NewGuid():N}")
@@ -42,7 +55,7 @@ let ``Collect preflight blocks missing csv and missing log`` () =
         let missingCsv = assertOk (preflightCollect settings "1001")
         Assert.False(missingCsv.CanCollect)
 
-        File.WriteAllText(outputBase + ".csv", "x,y,dose\n0,0,1")
+        File.WriteAllText(outputBase + ".csv", "x,y,z,dose\n0,0,0,1")
         let missingLog = assertOk (preflightCollect settings "1001")
         Assert.False(missingLog.CanCollect)
         Assert.Equal(1, missingLog.MissingLogCount)
@@ -67,8 +80,8 @@ let ``Collect preflight passes when csv and log exist`` () =
         let inputPath = Path.Combine(inputFolder, "seed10011_phsp01.txt")
         let outputBase = Path.Combine(runFolder, "seed10011_phsp01")
         File.WriteAllText(inputPath, "input")
-        File.WriteAllText(outputBase + ".csv", "x,y,dose\n0,0,1")
-        File.WriteAllText(outputBase + ".log", "ok")
+        File.WriteAllText(outputBase + ".csv", "x,y,z,dose\n0,0,0,1")
+        File.WriteAllText(outputBase + ".log", successfulTopasFooter)
 
         let dbPath = Path.Combine(appRoot, "database", "app.db")
         let csb = SqliteConnectionStringBuilder()
@@ -112,8 +125,8 @@ let ``Collect preflight detects empty csv and fatal log`` () =
 
         let preflight = assertOk (preflightCollect settings "1001")
         Assert.False(preflight.CanCollect)
-        Assert.True(preflight.FileIssues |> List.exists (fun issue -> issue.Problem = "Empty"))
-        Assert.True(preflight.FileIssues |> List.exists (fun issue -> issue.Problem = "FatalContent"))
+        Assert.True(preflight.FileIssues |> List.exists (fun issue -> issue.Problem = "EmptyCsv"))
+        Assert.True(preflight.FileIssues |> List.exists (fun issue -> issue.Problem = "IncompleteTopasLog"))
     finally
         cleanupTestDirectory appRoot
 
@@ -150,13 +163,13 @@ let ``Collect preview supports excluding failed phase-space or node`` () =
             File.WriteAllText(inputPath, "input")
 
         File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,z,dose\n0,0,0,1")
-        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), successfulTopasFooter)
         File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,z,dose\n0,0,0,2")
-        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), successfulTopasFooter)
         File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.csv"), "")
         File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.log"), "does not support particle ID")
         File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.csv"), "x,y,z,dose\n0,0,0,4")
-        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.log"), successfulTopasFooter)
 
         let strictPreview =
             assertOk (
@@ -326,8 +339,8 @@ let ``Collect operation writes outputs and updates status`` () =
         File.WriteAllText(Path.Combine(inputFolder, "seed10012_phsp01.txt"), "input")
         File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,1")
         File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,2")
-        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
-        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), successfulTopasFooter)
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), successfulTopasFooter)
 
         let result =
             assertOk (
@@ -389,13 +402,13 @@ let ``Collect operation applies phase-space exclusions to merge and manifest`` (
             File.WriteAllText(inputPath, "input")
 
         File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,z,dose\n0,0,0,1")
-        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), successfulTopasFooter)
         File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,z,dose\n0,0,0,2")
-        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), successfulTopasFooter)
         File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.csv"), "")
         File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.log"), "does not support particle ID")
         File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.csv"), "x,y,z,dose\n0,0,0,4")
-        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.log"), successfulTopasFooter)
 
         let result =
             assertOk (
@@ -419,5 +432,97 @@ let ``Collect operation applies phase-space exclusions to merge and manifest`` (
         let manifestLines = File.ReadAllLines(Path.Combine(outputFolder, "collect_manifest.tsv"))
         Assert.Equal(3, manifestLines.Length)
         Assert.DoesNotContain(manifestLines, (fun line -> line.Contains("phsp20")))
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
+let ``Collect preflight accepts warning-heavy log when TOPAS footer exists`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-warnings-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        assertOk (initialize settings) |> ignore
+
+        let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+        let runFolder = Path.Combine(appRoot, "runs", "1001")
+        Directory.CreateDirectory(inputFolder) |> ignore
+        Directory.CreateDirectory(runFolder) |> ignore
+
+        let inputPath = Path.Combine(inputFolder, "seed10011_phsp01.txt")
+        let outputBase = Path.Combine(runFolder, "seed10011_phsp01")
+        File.WriteAllText(inputPath, "input")
+        File.WriteAllText(outputBase + ".csv", "# TOPAS Version...\n# DoseToMedium...\n0,0,0,1.23E-08")
+
+        let warningHeavyLog =
+            String.concat
+                "\n"
+                [
+                    "G4Exception : Stuck track"
+                    "ERROR: particle had unusual state"
+                    "Exception-like warning text from Geant4"
+                    successfulTopasFooter
+                ]
+
+        File.WriteAllText(outputBase + ".log", warningHeavyLog)
+
+        let dbPath = Path.Combine(appRoot, "database", "app.db")
+        let csb = SqliteConnectionStringBuilder()
+        csb.DataSource <- dbPath
+        use conn = new SqliteConnection(csb.ConnectionString)
+        conn.Open()
+        seedGeneratedBatch conn "1001" [ ("seed10011_phsp01", "01", "1", inputPath, outputBase) ]
+
+        let preflight = assertOk (preflightCollect settings "1001")
+        Assert.True(preflight.CanCollect)
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
+let ``Collect preflight reports particle-id failure when TOPAS footer is missing`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-particleid-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        assertOk (initialize settings) |> ignore
+
+        let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+        let runFolder = Path.Combine(appRoot, "runs", "1001")
+        Directory.CreateDirectory(inputFolder) |> ignore
+        Directory.CreateDirectory(runFolder) |> ignore
+
+        let inputPath = Path.Combine(inputFolder, "seed10011_phsp20.txt")
+        let outputBase = Path.Combine(runFolder, "seed10011_phsp20")
+        File.WriteAllText(inputPath, "input")
+        File.WriteAllText(outputBase + ".csv", "")
+
+        File.WriteAllText(
+            outputBase + ".log",
+            String.concat
+                "\n"
+                [
+                    "TOPAS is quitting due to a serious error in specification of particle source: Beam"
+                    "\"limited\" format phase space does not support particle ID: 36"
+                ]
+        )
+
+        let dbPath = Path.Combine(appRoot, "database", "app.db")
+        let csb = SqliteConnectionStringBuilder()
+        csb.DataSource <- dbPath
+        use conn = new SqliteConnection(csb.ConnectionString)
+        conn.Open()
+        seedGeneratedBatch conn "1001" [ ("seed10011_phsp20", "20", "1", inputPath, outputBase) ]
+
+        let preflight = assertOk (preflightCollect settings "1001")
+        Assert.False(preflight.CanCollect)
+
+        let logIssue =
+            preflight.FileIssues
+            |> List.find (fun issue -> issue.FileKind = "Log" && issue.Problem = "IncompleteTopasLog")
+
+        Assert.Contains("does not support particle ID: 36", defaultArg logIssue.Message "")
     finally
         cleanupTestDirectory appRoot

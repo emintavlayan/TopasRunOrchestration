@@ -1,6 +1,7 @@
 module CollectPreflight
 
 open System
+open System.Globalization
 open System.IO
 open Shared
 open CollectPlanning
@@ -9,32 +10,96 @@ open TsebtConfig
 /// Builds one missing-file compatibility descriptor.
 let private missingFile (fileKind: string) (path: string) : MissingCollectFile = { FileKind = fileKind; Path = path }
 
-/// Returns true when one log line contains a fatal TOPAS signature.
-let private isFatalLogLine (line: string) : bool =
-    [
-        "TOPAS is quitting due to a serious error"
-        "does not support particle ID"
-        "Segmentation fault"
-        "Aborted"
-        "Exception"
-    ]
-    |> List.exists (fun token -> line.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0)
+/// Returns true when text contains one token, ignoring case.
+let private containsIgnoreCase (text: string) (token: string) : bool =
+    text.IndexOf(token, StringComparison.OrdinalIgnoreCase) >= 0
 
-/// Reads one log file and returns the first fatal line when present.
-let private tryFindFatalLogLine (path: string) : Result<string option, string> =
+/// Returns true when one string parses as a floating-point value in invariant culture.
+let private tryParseInvariantFloat (value: string) : bool =
+    let mutable parsedValue = 0.0
+
+    Double.TryParse(
+        value.Trim(),
+        NumberStyles.Float ||| NumberStyles.AllowThousands,
+        CultureInfo.InvariantCulture,
+        &parsedValue
+    )
+
+/// Returns true when one csv row contains numeric TOPAS scorer data.
+let private isNumericTopasCsvRow (line: string) : bool =
+    let columns = line.Split(',')
+
+    if columns.Length < 4 then
+        false
+    else
+        let xOk = tryParseInvariantFloat columns[0]
+        let yOk = tryParseInvariantFloat columns[1]
+        let zOk = tryParseInvariantFloat columns[2]
+        let fourthOk = tryParseInvariantFloat columns[3]
+        let lastOk = tryParseInvariantFloat columns[columns.Length - 1]
+        xOk && yOk && zOk && (fourthOk || lastOk)
+
+/// Returns true when the csv file contains at least one numeric TOPAS data row.
+let private hasNumericTopasCsvRows (path: string) : Result<bool, string> =
     try
         use reader = new StreamReader(path)
-        let mutable fatal: string option = None
-        let mutable searching = true
+        let mutable found = false
 
-        while searching && not reader.EndOfStream do
+        while not reader.EndOfStream && not found do
             let line = reader.ReadLine()
+            let trimmedLine = if isNull line then "" else line.Trim()
 
-            if not (isNull line) && isFatalLogLine line then
-                fatal <- Some line
-                searching <- false
+            if not (String.IsNullOrWhiteSpace(trimmedLine)) && not (trimmedLine.StartsWith("#", StringComparison.Ordinal)) then
+                found <- isNumericTopasCsvRow trimmedLine
 
-        Ok fatal
+        Ok found
+    with ex ->
+        Error ex.Message
+
+/// Returns true when the TOPAS log contains the completion timing footer markers.
+let hasSuccessfulTopasTimingFooter (logText: string) : bool =
+    [
+        "Elapsed times:"
+        "Parameter Reading"
+        "Initialization:"
+        "Execution:"
+        "Finalization:"
+        "Total:"
+    ]
+    |> List.forall (containsIgnoreCase logText)
+
+/// Returns one preferred TOPAS failure message extracted from the log text.
+let extractTopasFailureMessage (logText: string) : string option =
+    let lines =
+        logText.Replace("\r\n", "\n").Split('\n')
+        |> Array.map (fun (line: string) -> line.Trim())
+        |> Array.filter (String.IsNullOrWhiteSpace >> not)
+
+    let tryFindContaining (token: string) =
+        lines |> Array.tryFind (fun line -> containsIgnoreCase line token)
+
+    match tryFindContaining "TOPAS is quitting due to a serious error", tryFindContaining "does not support particle ID" with
+    | Some seriousErrorLine, Some particleIdLine when not (String.Equals(seriousErrorLine, particleIdLine, StringComparison.Ordinal)) ->
+        Some $"{seriousErrorLine} | {particleIdLine}"
+    | Some seriousErrorLine, _ -> Some seriousErrorLine
+    | None, Some particleIdLine -> Some particleIdLine
+    | None, None -> None
+
+/// Classifies TOPAS log health using completion timing footer detection.
+let classifyLogHealth (logText: string) : Result<unit, string> =
+    if hasSuccessfulTopasTimingFooter logText then
+        Ok()
+    else
+        Error(
+            defaultArg
+                (extractTopasFailureMessage logText)
+                "TOPAS log does not contain successful completion timing footer."
+        )
+
+/// Reads one text file fully.
+let private readAllText (path: string) : Result<string, string> =
+    try
+        Ok(File.ReadAllText(path))
     with ex ->
         Error ex.Message
 
@@ -61,33 +126,46 @@ let private collectRowFileIssues (row: CollectRunRow) : CollectFileIssue list =
     let csvPath, logPath = expectedCsvAndLogPaths row
     let csvIssues =
         if not (File.Exists csvPath) then
-            [ collectFileIssue row "csv" csvPath "Missing" None ]
+            [ collectFileIssue row "Csv" csvPath "MissingCsv" None ]
         else
             let info = FileInfo(csvPath)
 
             if info.Length <= 0L then
-                [ collectFileIssue row "csv" csvPath "Empty" None ]
+                [ collectFileIssue row "Csv" csvPath "EmptyCsv" (Some "CSV file is zero bytes.") ]
             else
-                []
+                match hasNumericTopasCsvRows csvPath with
+                | Error message -> [ collectFileIssue row "Csv" csvPath "CsvReadError" (Some message) ]
+                | Ok true -> []
+                | Ok false ->
+                    [
+                        collectFileIssue
+                            row
+                            "Csv"
+                            csvPath
+                            "NoNumericCsvRows"
+                            (Some "CSV exists but contains no numeric TOPAS scorer rows.")
+                    ]
 
     let logIssues =
         if not (File.Exists logPath) then
-            [ collectFileIssue row "log" logPath "Missing" None ]
+            [ collectFileIssue row "Log" logPath "MissingLog" None ]
         else
-            match tryFindFatalLogLine logPath with
-            | Error message -> [ collectFileIssue row "log" logPath "ReadError" (Some message) ]
-            | Ok(Some fatalLine) -> [ collectFileIssue row "log" logPath "FatalContent" (Some fatalLine) ]
-            | Ok None -> []
+            match readAllText logPath with
+            | Error message -> [ collectFileIssue row "Log" logPath "LogReadError" (Some message) ]
+            | Ok logText ->
+                match classifyLogHealth logText with
+                | Ok() -> []
+                | Error message -> [ collectFileIssue row "Log" logPath "IncompleteTopasLog" (Some message) ]
 
     csvIssues @ logIssues
 
 /// Returns true when one issue belongs to a csv file.
 let private isCsvIssue (issue: CollectFileIssue) : bool =
-    String.Equals(issue.FileKind, "csv", StringComparison.OrdinalIgnoreCase)
+    String.Equals(issue.FileKind, "Csv", StringComparison.OrdinalIgnoreCase)
 
 /// Returns true when one issue belongs to a log file.
 let private isLogIssue (issue: CollectFileIssue) : bool =
-    String.Equals(issue.FileKind, "log", StringComparison.OrdinalIgnoreCase)
+    String.Equals(issue.FileKind, "Log", StringComparison.OrdinalIgnoreCase)
 
 /// Applies requested phase-space and node exclusions to collect rows.
 let applyCollectExclusions
@@ -185,14 +263,18 @@ let buildCollectPreflightResult
                 failedCheck "Rows remain after exclusions" "No rows remain after exclusions."
 
             if missingCsvCount = 0 then
-                passedCheck "Input CSV files exist and are non-empty"
+                passedCheck "Input CSV files exist and contain numeric scorer rows"
             else
-                failedCheck "Input CSV files exist and are non-empty" $"Detected {missingCsvCount} csv file issues."
+                failedCheck
+                    "Input CSV files exist and contain numeric scorer rows"
+                    $"Detected {missingCsvCount} csv file issues."
 
             if missingLogCount = 0 then
-                passedCheck "Log files exist and have no fatal errors"
+                passedCheck "Log files contain successful TOPAS completion footer"
             else
-                failedCheck "Log files exist and have no fatal errors" $"Detected {missingLogCount} log file issues."
+                failedCheck
+                    "Log files contain successful TOPAS completion footer"
+                    $"Detected {missingLogCount} log file issues."
 
             match balanceResult with
             | Ok() -> passedCheck "Remaining rows are balanced"
