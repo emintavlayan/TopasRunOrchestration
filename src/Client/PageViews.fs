@@ -16,6 +16,7 @@ let themeValue (theme: ThemeName) =
     | Dark -> "dark"
     | Corporate -> "corporate"
     | Night -> "night"
+    | Cyberpunk -> "cyberpunk"
 
 /// Returns the display label for the selected shell theme.
 let themeLabel (theme: ThemeName) =
@@ -24,6 +25,7 @@ let themeLabel (theme: ThemeName) =
     | Dark -> "Dark"
     | Corporate -> "Corporate"
     | Night -> "Night"
+    | Cyberpunk -> "Cyberpunk"
 
 /// Parses a daisyUI theme token into a shell theme.
 let themeFromValue (value: string) =
@@ -31,6 +33,7 @@ let themeFromValue (value: string) =
     | "dark" -> Dark
     | "corporate" -> Corporate
     | "night" -> Night
+    | "cyberpunk" -> Cyberpunk
     | _ -> Light
 
 /// Returns classes for top-level workflow navigation buttons.
@@ -71,7 +74,7 @@ let viewThemeSelector (selectedTheme: ThemeName) (dispatch: Msg -> unit) =
                 prop.value (themeValue selectedTheme)
                 prop.onChange (fun (value: string) -> value |> themeFromValue |> SelectTheme |> dispatch)
                 prop.children [
-                    for theme in [ Light; Dark; Corporate; Night ] do
+                    for theme in [ Light; Dark; Corporate; Night; Cyberpunk ] do
                         Html.option [
                             prop.value (themeValue theme)
                             prop.text (themeLabel theme)
@@ -132,7 +135,7 @@ let viewPageContent (model: Model) (dispatch: Msg -> unit) =
 /// Renders the client landing page and selected content.
 let view (model: Model) (dispatch: Msg -> unit) =
     Html.main [
-        prop.className "min-h-screen bg-base-200 text-base-content"
+        prop.className "min-h-screen w-full bg-base-200 text-base-content"
         prop.custom ("data-theme", themeValue model.SelectedTheme)
         prop.children [
             Html.section [

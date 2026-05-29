@@ -15,6 +15,7 @@ type ThemeName =
     | Dark
     | Corporate
     | Night
+    | Cyberpunk
 
 /// Represents the steps in the generate wizard flow.
 type GenerateStep =
