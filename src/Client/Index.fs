@@ -12,6 +12,8 @@ open Shared
 type Page = GenerateTypes.Page
 /// Represents the generate step type used by the Index module.
 type GenerateStep = GenerateTypes.GenerateStep
+/// Represents the shell theme type used by the Index module.
+type ThemeName = GenerateTypes.ThemeName
 /// Represents the generate model type used by the Index module.
 type GenerateModel = GenerateTypes.GenerateModel
 /// Represents the run model type used by the Index module.
@@ -43,6 +45,7 @@ let CollectMergeReview = GenerateTypes.CollectStep.CollectMergeReview
 let CollectResult = GenerateTypes.CollectStep.CollectResult
 
 let SelectPage = GenerateTypes.Msg.SelectPage
+let SelectTheme = GenerateTypes.Msg.SelectTheme
 let LoadAppConfig = GenerateTypes.Msg.LoadAppConfig
 let LoadTemplateFiles = GenerateTypes.Msg.LoadTemplateFiles
 let StartGenerateWizard = GenerateTypes.Msg.StartGenerateWizard
@@ -82,6 +85,7 @@ let topasApi = Api.makeProxy<ITopasApi> ()
 let init () : Model * Cmd<Msg> =
     let model = {
         SelectedPage = Generate
+        SelectedTheme = GenerateTypes.ThemeName.Light
         Generate = initialGenerateModel ()
         Run = initialRunModel ()
         Collect = initialCollectModel ()
@@ -136,12 +140,29 @@ let runCollectBatchCmd (request: CollectRequest) : Cmd<Msg> =
 let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
     match msg with
     | SelectPage page ->
-        if page = Run then
-            { model with SelectedPage = page }, Cmd.ofMsg (LoadRunBatches(Start()))
-        elif page = Collect then
-            { model with SelectedPage = page }, Cmd.ofMsg (LoadCollectBatches(Start()))
-        else
-            { model with SelectedPage = page }, Cmd.none
+        match page with
+        | Generate ->
+            {
+                model with
+                    SelectedPage = Generate
+                    Generate = initialGenerateModel ()
+            },
+            Cmd.batch [ Cmd.ofMsg (LoadAppConfig(Start())); Cmd.ofMsg (LoadTemplateFiles(Start())) ]
+        | Run ->
+            {
+                model with
+                    SelectedPage = Run
+                    Run = initialRunModel ()
+            },
+            Cmd.ofMsg (LoadRunBatches(Start()))
+        | Collect ->
+            {
+                model with
+                    SelectedPage = Collect
+                    Collect = initialCollectModel ()
+            },
+            Cmd.ofMsg (LoadCollectBatches(Start()))
+    | SelectTheme theme -> { model with SelectedTheme = theme }, Cmd.none
     | LoadAppConfig call ->
         match call with
         | Start() ->

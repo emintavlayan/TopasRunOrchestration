@@ -89,15 +89,15 @@ let viewNodes (generate: GenerateModel) (dispatch: Msg -> unit) =
     | Loaded config ->
         Html.div [
             Html.div [
-                prop.className "mb-3 flex gap-2"
+                prop.className "mb-3 join"
                 prop.children [
                     Html.button [
-                        prop.className "btn btn-outline btn-sm"
+                        prop.className "join-item btn btn-outline btn-sm"
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllNodes)
                     ]
                     Html.button [
-                        prop.className "btn btn-outline btn-sm"
+                        prop.className "join-item btn btn-outline btn-sm"
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoNodes)
                     ]
@@ -120,15 +120,15 @@ let viewPhaseSpaceFiles (generate: GenerateModel) (dispatch: Msg -> unit) =
     | Loaded config ->
         Html.div [
             Html.div [
-                prop.className "mb-3 flex gap-2"
+                prop.className "mb-3 join"
                 prop.children [
                     Html.button [
-                        prop.className "btn btn-outline btn-sm"
+                        prop.className "join-item btn btn-outline btn-sm"
                         prop.text "Select all"
                         prop.onClick (fun _ -> dispatch SelectAllPhaseSpaceFiles)
                     ]
                     Html.button [
-                        prop.className "btn btn-outline btn-sm"
+                        prop.className "join-item btn btn-outline btn-sm"
                         prop.text "Select none"
                         prop.onClick (fun _ -> dispatch SelectNoPhaseSpaceFiles)
                     ]

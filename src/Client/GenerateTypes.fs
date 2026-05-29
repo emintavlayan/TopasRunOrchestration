@@ -9,6 +9,13 @@ type Page =
     | Run
     | Collect
 
+/// Represents the visual theme selected for the client shell.
+type ThemeName =
+    | Light
+    | Dark
+    | Corporate
+    | Night
+
 /// Represents the steps in the generate wizard flow.
 type GenerateStep =
     | Welcome
@@ -70,6 +77,7 @@ type CollectModel = {
 /// Represents the root client model.
 type Model = {
     SelectedPage: Page
+    SelectedTheme: ThemeName
     Generate: GenerateModel
     Run: RunModel
     Collect: CollectModel
@@ -78,6 +86,7 @@ type Model = {
 /// Represents messages that can update the client model.
 type Msg =
     | SelectPage of Page
+    | SelectTheme of ThemeName
     | LoadAppConfig of ApiCall<unit, Result<AppConfigView, string>>
     | LoadTemplateFiles of ApiCall<unit, Result<TemplateFileInfo list, string>>
     | StartGenerateWizard

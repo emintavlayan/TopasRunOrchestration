@@ -151,55 +151,33 @@ let viewSlurmScript (appRoot: string option) (run: RunModel) =
         let rootDisplay = defaultArg appRoot "-"
 
         Html.div [
-            prop.className "space-y-4"
+            prop.className "space-y-4 min-h-0"
             prop.children [
-                Html.div [
-                    prop.className "grid gap-2 rounded-box bg-base-200 p-3 text-sm md:grid-cols-2"
-                    prop.children [
-                        Html.p [ prop.text $"Seed base: {preview.SeedBase}" ]
-                        Html.p [ prop.text $"Generated runs: {preview.RunCount}" ]
-                        Html.p [ prop.className "md:col-span-2 break-all font-mono text-xs"; prop.text $"Root: {rootDisplay}" ]
-                    ]
-                ]
-                for nodePreview in preview.NodeScriptPreviews do
+                match preview.NodeScriptPreviews |> List.tryHead with
+                | Some nodePreview ->
                     let manifestDisplayPath = makeRelativePath appRoot nodePreview.ManifestPath
                     let scriptDisplayPath = makeRelativePath appRoot nodePreview.ScriptPath
-                    Html.h4 [ prop.className "font-semibold"; prop.text $"Node: {nodePreview.NodeName}" ]
                     Html.div [
-                        prop.className "space-y-2"
+                        prop.className "space-y-3 text-sm"
                         prop.children [
-                            Html.p [ prop.className "break-all font-mono text-xs"; prop.text $"Manifest: {manifestDisplayPath}" ]
-                            Html.p [ prop.className "break-all font-mono text-xs"; prop.text $"Script: {scriptDisplayPath}" ]
-                            Html.p [ prop.text $"Task count: {nodePreview.TaskCount}" ]
                             Html.div [
-                                prop.className "overflow-x-auto"
+                                prop.className "grid gap-x-6 gap-y-2 md:grid-cols-2"
                                 prop.children [
-                                    Html.table [
-                                        prop.className "table table-zebra text-xs"
-                                        prop.children [
-                                            Html.thead [
-                                                Html.tr [
-                                                    Html.th [ prop.className "border-b border-base-300 px-2 py-1 text-left"; prop.text "Task" ]
-                                                    Html.th [ prop.className "border-b border-base-300 px-2 py-1 text-left"; prop.text "Node" ]
-                                                    Html.th [ prop.className "border-b border-base-300 px-2 py-1 text-left"; prop.text "Run id" ]
-                                                    Html.th [ prop.className "border-b border-base-300 px-2 py-1 text-left"; prop.text "Input" ]
-                                                    Html.th [ prop.className "border-b border-base-300 px-2 py-1 text-left"; prop.text "Log" ]
-                                                ]
-                                            ]
-                                            Html.tbody [
-                                                for row in nodePreview.ManifestRowsPreview do
-                                                    let inputDisplayPath = makeRelativePath appRoot row.InputFilePath
-                                                    let logDisplayPath = makeRelativePath appRoot row.LogFilePath
-
-                                                    Html.tr [
-                                                        Html.td [ prop.className "border-b border-base-200 px-2 py-1"; prop.text $"{row.TaskId}" ]
-                                                        Html.td [ prop.className "border-b border-base-200 px-2 py-1"; prop.text row.NodeName ]
-                                                        Html.td [ prop.className "border-b border-base-200 px-2 py-1"; prop.text row.RunId ]
-                                                        Html.td [ prop.className "border-b border-base-200 px-2 py-1 break-all font-mono"; prop.text inputDisplayPath ]
-                                                        Html.td [ prop.className "border-b border-base-200 px-2 py-1 break-all font-mono"; prop.text logDisplayPath ]
-                                                    ]
-                                            ]
-                                        ]
+                                    Html.p [ prop.children [ Html.span [ prop.className "font-semibold"; prop.text "Seed base: " ]; Html.span preview.SeedBase ] ]
+                                    Html.p [ prop.children [ Html.span [ prop.className "font-semibold"; prop.text "Generated runs: " ]; Html.span $"{preview.RunCount}" ] ]
+                                    Html.p [ prop.children [ Html.span [ prop.className "font-semibold"; prop.text "Node: " ]; Html.span nodePreview.NodeName ] ]
+                                    Html.p [ prop.children [ Html.span [ prop.className "font-semibold"; prop.text "Task count: " ]; Html.span $"{nodePreview.TaskCount}" ] ]
+                                    Html.p [
+                                        prop.className "md:col-span-2 break-all"
+                                        prop.children [ Html.span [ prop.className "font-semibold"; prop.text "Root: " ]; Html.span [ prop.className "font-mono text-xs"; prop.text rootDisplay ] ]
+                                    ]
+                                    Html.p [
+                                        prop.className "md:col-span-2 break-all"
+                                        prop.children [ Html.span [ prop.className "font-semibold"; prop.text "Manifest: " ]; Html.span [ prop.className "font-mono text-xs"; prop.text manifestDisplayPath ] ]
+                                    ]
+                                    Html.p [
+                                        prop.className "md:col-span-2 break-all"
+                                        prop.children [ Html.span [ prop.className "font-semibold"; prop.text "Script: " ]; Html.span [ prop.className "font-mono text-xs"; prop.text scriptDisplayPath ] ]
                                     ]
                                 ]
                             ]
@@ -208,6 +186,11 @@ let viewSlurmScript (appRoot: string option) (run: RunModel) =
                                 prop.text nodePreview.ScriptText
                             ]
                         ]
+                    ]
+                | None ->
+                    Html.p [
+                        prop.className "text-sm text-base-content/70"
+                        prop.text "No node script preview available."
                     ]
             ]
         ]
