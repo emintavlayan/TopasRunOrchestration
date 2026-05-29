@@ -11,8 +11,8 @@ The application follows SAFE Light separation:
 ## Implemented workflows
 
 - Generate workflow (preview + execution + metadata persistence)
-- Run workflow (batch list, preflight, Slurm script preview, submit)
-- Collect workflow (preflight, CSV merge, statistics, metadata update)
+- Run workflow (batch list, preflight, per-node Slurm script planning, submit)
+- Collect workflow (preflight + optional exclusions, CSV merge, statistics, metadata update)
 
 ## Persistent model
 
@@ -48,13 +48,30 @@ Generate and Run perform preflight/collision checks before committing state.
 
 - Generate is all-or-nothing on collision failures.
 - Run blocks double-submit and preflight failures.
-- Collect blocks when required CSV inputs are missing.
+- Collect blocks when required CSV/log health checks fail or remaining rows are unbalanced.
+
+Collect preflight success requires:
+
+- CSV exists
+- CSV is non-empty
+- CSV has at least one numeric TOPAS data row
+- log exists
+- log contains TOPAS completion timing footer markers
 
 ## Runtime assumptions
 
 - Dev host is typically Windows.
 - Target runtime is Linux (cluster/server).
 - Slurm/TOPAS availability is host-dependent and not required for unit tests.
+
+## Client UX model
+
+- One shared app shell with top navbar for `Generate`, `Run`, `Collect`.
+- One shared wizard shell for all workflows:
+  - left vertical stepper
+  - scrollable content body
+  - fixed footer actions (`Cancel`, `Previous`, primary)
+- Theme selector supports: `Light`, `Dark`, `Corporate`, `Night`, `Cyberpunk`.
 
 ## Not implemented
 

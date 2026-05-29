@@ -8,15 +8,20 @@
 
 Optional for full Run workflow:
 
-- Slurm (`sbatch`, `srun`) available on host
+- Slurm (`sbatch`) available on host
 - TOPAS executable available on host
 
 ## 2. First local setup
 
-1. Open `src/Server/appsettings.Development.json`.
+1. Open `src/Server/appsettings.json`.
 2. Set `Tsebt:AppRoot` to a local writable folder.
 3. Verify paths under `Tsebt:Paths`.
 4. Verify node names/digits and phase-space entries.
+5. For Run on Slurm, verify:
+   - `Tsebt:Slurm:Partition`
+   - `Tsebt:Slurm:CpusPerTask`
+   - `Tsebt:Slurm:Account` (cluster-specific, optional in local dev)
+6. Verify `Tsebt:Topas:Executable` points to a valid TOPAS command/wrapper.
 
 ## 3. Run the app
 
@@ -49,6 +54,7 @@ dotnet test Application.sln --logger "console;verbosity=normal"
 ## 7. Where to read next
 
 - App overview: `docs/app-behaviour-spec.md`
+- Unified wizard UX: `docs/wizard-ux-flow-spec.md`
 - Generate details: `docs/generate-behaviour-spec.md`
 - Run details: `docs/run-behaviour-spec.md`
 - Collect details: `docs/collect-behaviour-spec.md`

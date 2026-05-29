@@ -12,6 +12,9 @@ This checklist tracks practical behavioral coverage for implemented server workf
 | Run manifest and script planning | Covered | `RunTests.fs` |
 | Run submission guards | Covered | `RunTests.fs` |
 | Collect preflight | Covered | `CollectTests.fs` |
+| Collect preflight log footer classification | Covered | `CollectTests.fs` |
+| Collect preflight CSV numeric-row validation | Covered | `CollectTests.fs` |
+| Collect exclusion behavior | Covered | `CollectTests.fs` |
 | Collect CSV merge | Covered | `CollectTests.fs` |
 | Collect statistics | Covered | `CollectTests.fs` |
 | Collect operation | Covered | `CollectTests.fs` |

@@ -48,7 +48,7 @@ Files produced:
 
 ```text
 collect_manifest.tsv
-phsp{phaseSpaceIndex}_merged.csv (one per phase-space index)
+merged/phsp{phaseSpaceIndex}_merged.csv (one per phase-space index)
 dose_summary.csv
 ```
 
@@ -59,12 +59,40 @@ Collect preflight reads `generated_runs` for the selected `seedBase` and checks:
 - generated runs exist
 - run folder exists
 - expected CSV files exist
+- expected CSV files are non-empty
+- expected CSV files contain at least one numeric TOPAS scorer row
 - expected log files exist
+- expected logs contain TOPAS completion timing footer markers
 
-Rules:
+Required TOPAS completion markers:
 
-- missing CSV files block collect (`CanCollect = false`)
-- missing log files are warnings only (do not block collect)
+- `Elapsed times:`
+- `Parameter Reading`
+- `Initialization:`
+- `Execution:`
+- `Finalization:`
+- `Total:`
+
+Important rule:
+
+- Geant4/TOPAS warning-like lines (for example `G4Exception`, `ERROR`, `Exception`) do not fail collect if completion footer markers exist.
+- Missing completion footer blocks collect.
+
+## Exclusion behavior
+
+Collect supports exclusion-based recovery from failed runs:
+
+- Exclude phase-space indexes (`ExcludedPhaseSpaceIndexes`)
+- Exclude node digits (`ExcludedNodeDigits`)
+
+Both are applied before health and balance checks.
+Current UI allows one mode at a time (phase-space or node exclusion).
+
+After exclusions, collect requires balanced remaining rows:
+
+- each remaining phase-space index must have the same remaining node set
+- otherwise collect is blocked with:
+  `Remaining collect set is unbalanced. Exclude a full phase-space or full node.`
 
 ## Merge behavior
 
@@ -96,11 +124,11 @@ Across all merged phase-space files:
 `collectBatch`:
 
 1. Runs preflight.
-2. Rejects when required CSV files are missing.
+2. Rejects when CSV/log/row-balance preflight fails.
 3. Rejects output collisions before writing files.
-4. Writes `collect_manifest.tsv`.
-5. Merges phase-space CSV files.
-6. Computes `dose_summary.csv`.
+4. Merges phase-space CSV files.
+5. Computes `dose_summary.csv`.
+6. Writes `collect_manifest.tsv`.
 7. Updates `generated_batches` collect metadata.
 
 All-or-nothing for status:
@@ -125,6 +153,6 @@ All-or-nothing for status:
 
 - CSV parser assumes compatible row/column structure across files being merged.
 - Merge logic assumes the last numeric column is the dose-like value to sum.
-- Missing CSV files block collect.
-- Missing log files are warnings only.
+- Missing/empty/non-numeric CSV files block collect.
+- Missing TOPAS completion timing footer blocks collect.
 - No recollect/overwrite workflow in current version.
