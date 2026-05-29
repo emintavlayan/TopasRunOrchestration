@@ -88,7 +88,7 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
         ]
 
 /// Renders collect preflight review.
-let viewCollectPreflight (collect: CollectModel) =
+let viewCollectPreflight (collect: CollectModel) (dispatch: Msg -> unit) =
     match collect.Preview with
     | NotStarted -> Html.p "No preflight data loaded."
     | Loading _ -> Html.p "Loading collect preflight..."
@@ -100,10 +100,103 @@ let viewCollectPreflight (collect: CollectModel) =
                     prop.className "grid gap-2 text-sm md:grid-cols-2"
                     prop.children [
                         Html.p [ prop.text $"Expected runs: {preview.Preflight.ExpectedRunCount}" ]
+                        Html.p [ prop.text $"Effective runs: {preview.Preflight.EffectiveRunCount}" ]
+                        Html.p [ prop.text $"Effective phase-spaces: {preview.Preflight.EffectivePhaseSpaceCount}" ]
+                        Html.p [ prop.text $"Effective nodes: {preview.Preflight.EffectiveNodeCount}" ]
                         Html.p [ prop.text $"CSV found/missing: {preview.Preflight.FoundCsvCount}/{preview.Preflight.MissingCsvCount}" ]
                         Html.p [ prop.text $"Logs found/missing: {preview.Preflight.FoundLogCount}/{preview.Preflight.MissingLogCount}" ]
                     ]
                 ]
+                Html.div [
+                    prop.className "space-y-1 text-sm"
+                    prop.children [
+                        Html.p [
+                            prop.text (
+                                if preview.Preflight.ExcludedPhaseSpaceIndexes.IsEmpty then
+                                    "Excluded phase-space indexes: none"
+                                else
+                                    "Excluded phase-space indexes: "
+                                    + System.String.Join(", ", preview.Preflight.ExcludedPhaseSpaceIndexes)
+                            )
+                        ]
+                        Html.p [
+                            prop.text (
+                                if preview.Preflight.ExcludedNodeDigits.IsEmpty then
+                                    "Excluded nodes: none"
+                                else
+                                    "Excluded nodes: " + System.String.Join(", ", preview.Preflight.ExcludedNodeDigits)
+                            )
+                        ]
+                    ]
+                ]
+                if preview.Preflight.FileIssues.IsEmpty then
+                    Html.none
+                else
+                    Html.div [
+                        prop.className "space-y-3"
+                        prop.children [
+                            Html.div [
+                                prop.className "flex flex-wrap gap-2"
+                                prop.children [
+                                    Html.button [
+                                        prop.className "btn btn-outline btn-sm"
+                                        prop.text "Skip failed phase-space files"
+                                        prop.onClick (fun _ ->
+                                            let excluded =
+                                                preview.Preflight.FileIssues
+                                                |> List.map _.PhaseSpaceIndex
+                                                |> List.distinct
+                                                |> List.sort
+
+                                            dispatch (ExcludeCollectPhaseSpaces excluded))
+                                    ]
+                                    Html.button [
+                                        prop.className "btn btn-outline btn-sm"
+                                        prop.text "Skip failed nodes"
+                                        prop.onClick (fun _ ->
+                                            let excluded =
+                                                preview.Preflight.FileIssues
+                                                |> List.map _.NodeDigit
+                                                |> List.distinct
+                                                |> List.sort
+
+                                            dispatch (ExcludeCollectNodes excluded))
+                                    ]
+                                ]
+                            ]
+                            Html.div [
+                                prop.className "overflow-x-auto"
+                                prop.children [
+                                    Html.table [
+                                        prop.className "table table-zebra table-sm"
+                                        prop.children [
+                                            Html.thead [
+                                                Html.tr [
+                                                    Html.th "Run id"
+                                                    Html.th "Phase-space"
+                                                    Html.th "Node"
+                                                    Html.th "File kind"
+                                                    Html.th "Problem"
+                                                    Html.th "Message"
+                                                ]
+                                            ]
+                                            Html.tbody [
+                                                for issue in preview.Preflight.FileIssues do
+                                                    Html.tr [
+                                                        Html.td issue.RunId
+                                                        Html.td issue.PhaseSpaceIndex
+                                                        Html.td issue.NodeDigit
+                                                        Html.td issue.FileKind
+                                                        Html.td issue.Problem
+                                                        Html.td (defaultArg issue.Message "-")
+                                                    ]
+                                            ]
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
                 Html.table [
                     prop.className "table table-zebra text-sm"
                     prop.children [
@@ -163,6 +256,9 @@ let viewCollectMergeReview (collect: CollectModel) =
                 Html.p $"Output folder: {preview.OutputFolder}"
                 Html.p $"Manifest: {preview.ManifestPath}"
                 Html.p $"Final summary: {preview.FinalSummaryPath}"
+                Html.p $"Effective run count: {preview.Preflight.EffectiveRunCount}"
+                Html.p $"Effective phase-space count: {preview.Preflight.EffectivePhaseSpaceCount}"
+                Html.p $"Effective node count: {preview.Preflight.EffectiveNodeCount}"
                 Html.h4 [ prop.className "font-semibold"; prop.text "Planned merged files" ]
                 Html.ul [
                     prop.className "list-disc pl-5"
@@ -218,7 +314,7 @@ let viewCollectStep (collect: CollectModel) (dispatch: Msg -> unit) =
     match collect.Step with
     | CollectWelcome -> viewCollectWelcome ()
     | CollectSelectBatch -> viewCollectBatchSelection collect dispatch
-    | CollectPreflightReview -> viewCollectPreflight collect
+    | CollectPreflightReview -> viewCollectPreflight collect dispatch
     | CollectMergeReview -> viewCollectMergeReview collect
     | CollectResult -> viewCollectResult collect
 

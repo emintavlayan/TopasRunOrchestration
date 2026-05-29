@@ -74,6 +74,8 @@ let CancelCollectWizard = GenerateTypes.Msg.CancelCollectWizard
 let PreviousCollectStep = GenerateTypes.Msg.PreviousCollectStep
 let NextCollectStep = GenerateTypes.Msg.NextCollectStep
 let SelectCollectBatch = GenerateTypes.Msg.SelectCollectBatch
+let ExcludeCollectPhaseSpaces = GenerateTypes.Msg.ExcludeCollectPhaseSpaces
+let ExcludeCollectNodes = GenerateTypes.Msg.ExcludeCollectNodes
 let LoadCollectBatches = GenerateTypes.Msg.LoadCollectBatches
 let LoadCollectPreview = GenerateTypes.Msg.LoadCollectPreview
 let RunCollectBatch = GenerateTypes.Msg.RunCollectBatch
@@ -640,7 +642,11 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                                 Error = None
                         }
                 },
-                loadCollectPreviewCmd { SeedBase = seedBase }
+                loadCollectPreviewCmd {
+                    SeedBase = seedBase
+                    ExcludedPhaseSpaceIndexes = model.Collect.ExcludedPhaseSpaceIndexes
+                    ExcludedNodeDigits = model.Collect.ExcludedNodeDigits
+                }
             | _ ->
                 {
                     model with
@@ -692,7 +698,11 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                                     Error = None
                             }
                     },
-                    runCollectBatchCmd { SeedBase = seedBase }
+                    runCollectBatchCmd {
+                        SeedBase = seedBase
+                        ExcludedPhaseSpaceIndexes = model.Collect.ExcludedPhaseSpaceIndexes
+                        ExcludedNodeDigits = model.Collect.ExcludedNodeDigits
+                    }
                 | _ ->
                     {
                         model with
@@ -710,10 +720,69 @@ let update (msg: Msg) (model: Model) : Model * Cmd<Msg> =
                 Collect = {
                     model.Collect with
                         SelectedSeedBase = Some seedBase
+                        ExcludedPhaseSpaceIndexes = []
+                        ExcludedNodeDigits = []
+                        CollectResult = NotStarted
                         Error = None
                 }
         },
         Cmd.none
+    | ExcludeCollectPhaseSpaces phaseSpaceIndexes ->
+        match model.Collect.SelectedSeedBase with
+        | Some seedBase ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            ExcludedPhaseSpaceIndexes = phaseSpaceIndexes
+                            ExcludedNodeDigits = []
+                            Preview = model.Collect.Preview.StartLoading()
+                            CollectResult = NotStarted
+                            Error = None
+                    }
+            },
+            loadCollectPreviewCmd {
+                SeedBase = seedBase
+                ExcludedPhaseSpaceIndexes = phaseSpaceIndexes
+                ExcludedNodeDigits = []
+            }
+        | None ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            Error = Some "Select a batch before setting exclusions."
+                    }
+            },
+            Cmd.none
+    | ExcludeCollectNodes nodeDigits ->
+        match model.Collect.SelectedSeedBase with
+        | Some seedBase ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            ExcludedPhaseSpaceIndexes = []
+                            ExcludedNodeDigits = nodeDigits
+                            Preview = model.Collect.Preview.StartLoading()
+                            CollectResult = NotStarted
+                            Error = None
+                    }
+            },
+            loadCollectPreviewCmd {
+                SeedBase = seedBase
+                ExcludedPhaseSpaceIndexes = []
+                ExcludedNodeDigits = nodeDigits
+            }
+        | None ->
+            {
+                model with
+                    Collect = {
+                        model.Collect with
+                            Error = Some "Select a batch before setting exclusions."
+                    }
+            },
+            Cmd.none
     | LoadCollectBatches call ->
         match call with
         | Start() ->

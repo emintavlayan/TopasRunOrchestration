@@ -69,6 +69,8 @@ type CollectModel = {
     Step: CollectStep
     Batches: RemoteData<CollectBatchSummary list>
     SelectedSeedBase: string option
+    ExcludedPhaseSpaceIndexes: string list
+    ExcludedNodeDigits: string list
     Preview: RemoteData<CollectPreviewResult>
     CollectResult: RemoteData<CollectResult>
     Error: string option
@@ -115,6 +117,8 @@ type Msg =
     | PreviousCollectStep
     | NextCollectStep
     | SelectCollectBatch of string
+    | ExcludeCollectPhaseSpaces of string list
+    | ExcludeCollectNodes of string list
     | LoadCollectBatches of ApiCall<unit, Result<CollectBatchSummary list, string>>
     | LoadCollectPreview of ApiCall<CollectPreviewRequest, Result<CollectPreviewResult, string>>
     | RunCollectBatch of ApiCall<CollectRequest, Result<CollectResult, string>>
