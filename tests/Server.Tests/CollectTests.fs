@@ -7,13 +7,14 @@ open Microsoft.Data.Sqlite
 open Xunit
 open Server.Tests.TestHelpers
 open CollectOperation
+open CollectPreflight
 open CollectCsvMerge
 open CollectStatistics
 open SqliteInit
 open Server
 
 [<Fact>]
-let ``Collect preflight blocks missing csv and allows missing log`` () =
+let ``Collect preflight blocks missing csv and missing log`` () =
     let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-{Guid.NewGuid():N}")
     Directory.CreateDirectory(appRoot) |> ignore
 
@@ -43,7 +44,7 @@ let ``Collect preflight blocks missing csv and allows missing log`` () =
 
         File.WriteAllText(outputBase + ".csv", "x,y,dose\n0,0,1")
         let missingLog = assertOk (preflightCollect settings "1001")
-        Assert.True(missingLog.CanCollect)
+        Assert.False(missingLog.CanCollect)
         Assert.Equal(1, missingLog.MissingLogCount)
     finally
         cleanupTestDirectory appRoot
@@ -78,6 +79,127 @@ let ``Collect preflight passes when csv and log exist`` () =
 
         let preflight = assertOk (preflightCollect settings "1001")
         Assert.True(preflight.CanCollect)
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
+let ``Collect preflight detects empty csv and fatal log`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-fatal-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        assertOk (initialize settings) |> ignore
+
+        let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+        let runFolder = Path.Combine(appRoot, "runs", "1001")
+        Directory.CreateDirectory(inputFolder) |> ignore
+        Directory.CreateDirectory(runFolder) |> ignore
+
+        let inputPath = Path.Combine(inputFolder, "seed10011_phsp01.txt")
+        let outputBase = Path.Combine(runFolder, "seed10011_phsp01")
+        File.WriteAllText(inputPath, "input")
+        File.WriteAllText(outputBase + ".csv", "")
+        File.WriteAllText(outputBase + ".log", "TOPAS is quitting due to a serious error")
+
+        let dbPath = Path.Combine(appRoot, "database", "app.db")
+        let csb = SqliteConnectionStringBuilder()
+        csb.DataSource <- dbPath
+        use conn = new SqliteConnection(csb.ConnectionString)
+        conn.Open()
+        seedGeneratedBatch conn "1001" [ ("seed10011_phsp01", "01", "1", inputPath, outputBase) ]
+
+        let preflight = assertOk (preflightCollect settings "1001")
+        Assert.False(preflight.CanCollect)
+        Assert.True(preflight.FileIssues |> List.exists (fun issue -> issue.Problem = "Empty"))
+        Assert.True(preflight.FileIssues |> List.exists (fun issue -> issue.Problem = "FatalContent"))
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
+let ``Collect preview supports excluding failed phase-space or node`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preview-exclude-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        assertOk (initialize settings) |> ignore
+
+        let inputFolder = Path.Combine(appRoot, "inputs", "1001")
+        let runFolder = Path.Combine(appRoot, "runs", "1001")
+        Directory.CreateDirectory(inputFolder) |> ignore
+        Directory.CreateDirectory(runFolder) |> ignore
+
+        let rows = [
+            ("seed10011_phsp01", "01", "1", Path.Combine(inputFolder, "seed10011_phsp01.txt"), Path.Combine(runFolder, "seed10011_phsp01"))
+            ("seed10012_phsp01", "01", "2", Path.Combine(inputFolder, "seed10012_phsp01.txt"), Path.Combine(runFolder, "seed10012_phsp01"))
+            ("seed10013_phsp20", "20", "1", Path.Combine(inputFolder, "seed10013_phsp20.txt"), Path.Combine(runFolder, "seed10013_phsp20"))
+            ("seed10014_phsp20", "20", "2", Path.Combine(inputFolder, "seed10014_phsp20.txt"), Path.Combine(runFolder, "seed10014_phsp20"))
+        ]
+
+        let dbPath = Path.Combine(appRoot, "database", "app.db")
+        let csb = SqliteConnectionStringBuilder()
+        csb.DataSource <- dbPath
+        use conn = new SqliteConnection(csb.ConnectionString)
+        conn.Open()
+        seedGeneratedBatch conn "1001" rows
+
+        for (_, _, _, inputPath, _) in rows do
+            File.WriteAllText(inputPath, "input")
+
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.csv"), "x,y,dose\n0,0,1")
+        File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.csv"), "x,y,dose\n0,0,2")
+        File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
+        File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.csv"), "")
+        File.WriteAllText(Path.Combine(runFolder, "seed10013_phsp20.log"), "does not support particle ID")
+        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.csv"), "x,y,dose\n0,0,4")
+        File.WriteAllText(Path.Combine(runFolder, "seed10014_phsp20.log"), "ok")
+
+        let strictPreview =
+            assertOk (
+                previewCollect
+                    settings
+                    {
+                        SeedBase = "1001"
+                        ExcludedPhaseSpaceIndexes = []
+                        ExcludedNodeDigits = []
+                    }
+            )
+        Assert.False(strictPreview.Preflight.CanCollect)
+        Assert.True(strictPreview.Preflight.FileIssues |> List.exists (fun issue -> issue.PhaseSpaceIndex = "20"))
+
+        let excludedPhspPreview =
+            assertOk (
+                previewCollect
+                    settings
+                    {
+                        SeedBase = "1001"
+                        ExcludedPhaseSpaceIndexes = [ "20" ]
+                        ExcludedNodeDigits = []
+                    }
+            )
+        Assert.True(excludedPhspPreview.Preflight.CanCollect)
+        Assert.Equal(2, excludedPhspPreview.Preflight.EffectiveRunCount)
+        Assert.Equal(1, excludedPhspPreview.Preflight.EffectivePhaseSpaceCount)
+        Assert.Equal(2, excludedPhspPreview.Preflight.EffectiveNodeCount)
+
+        let excludedNodePreview =
+            assertOk (
+                previewCollect
+                    settings
+                    {
+                        SeedBase = "1001"
+                        ExcludedPhaseSpaceIndexes = []
+                        ExcludedNodeDigits = [ "1" ]
+                    }
+            )
+        Assert.True(excludedNodePreview.Preflight.CanCollect)
+        Assert.Equal(2, excludedNodePreview.Preflight.EffectiveRunCount)
+        Assert.Equal(2, excludedNodePreview.Preflight.EffectivePhaseSpaceCount)
+        Assert.Equal(1, excludedNodePreview.Preflight.EffectiveNodeCount)
     finally
         cleanupTestDirectory appRoot
 
@@ -207,7 +329,16 @@ let ``Collect operation writes outputs and updates status`` () =
         File.WriteAllText(Path.Combine(runFolder, "seed10011_phsp01.log"), "ok")
         File.WriteAllText(Path.Combine(runFolder, "seed10012_phsp01.log"), "ok")
 
-        let result = assertOk (collectBatch settings { SeedBase = "1001" })
+        let result =
+            assertOk (
+                collectBatch
+                    settings
+                    {
+                        SeedBase = "1001"
+                        ExcludedPhaseSpaceIndexes = []
+                        ExcludedNodeDigits = []
+                    }
+            )
         Assert.Equal("Collected", result.Status)
         let outputFolder = Path.Combine(appRoot, "outputs", "1001")
         Assert.True(File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv")))
