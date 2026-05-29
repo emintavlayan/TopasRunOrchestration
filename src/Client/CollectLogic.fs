@@ -39,13 +39,14 @@ let showPreviousCollectButton (step: CollectStep) : bool =
     | _ -> true
 
 /// Returns collect step primary action button text.
-let collectPrimaryButtonText (step: CollectStep) : string =
-    match step with
-    | CollectWelcome -> "Start"
-    | CollectSelectBatch -> "Next"
-    | CollectPreflightReview -> "Next"
-    | CollectMergeReview -> "Collect"
-    | CollectResult -> "Back to Collect"
+let collectPrimaryButtonText (collect: CollectModel) : string =
+    match collect.Step, collect.CollectResult with
+    | CollectMergeReview, Loading _ -> "Collecting..."
+    | CollectWelcome, _ -> "Start"
+    | CollectSelectBatch, _ -> "Next"
+    | CollectPreflightReview, _ -> "Next"
+    | CollectMergeReview, _ -> "Collect"
+    | CollectResult, _ -> "Back to Collect"
 
 /// Returns true when collect primary action should be disabled.
 let disableCollectPrimaryButton (collect: CollectModel) : bool =
@@ -53,7 +54,10 @@ let disableCollectPrimaryButton (collect: CollectModel) : bool =
     | CollectSelectBatch -> not (canProceedCollectBatchSelection collect)
     | CollectPreflightReview -> not (canProceedCollectPreflight collect)
     | CollectMergeReview ->
-        match collect.Preview with
-        | Loaded preview -> not preview.Preflight.CanCollect
-        | _ -> true
+        match collect.CollectResult with
+        | Loading _ -> true
+        | _ ->
+            match collect.Preview with
+            | Loaded preview -> not preview.Preflight.CanCollect
+            | _ -> true
     | _ -> false

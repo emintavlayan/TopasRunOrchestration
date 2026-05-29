@@ -150,6 +150,16 @@ let viewCollectMergeReview (collect: CollectModel) =
         Html.div [
             prop.className "space-y-3 text-sm text-base-content/80"
             prop.children [
+                match collect.CollectResult with
+                | Loading _ ->
+                    Html.div [
+                        prop.className "alert alert-info"
+                        prop.children [
+                            Html.span [ prop.className "loading loading-spinner loading-sm" ]
+                            Html.span "Collect is running. This may take several minutes for large TOPAS CSV files."
+                        ]
+                    ]
+                | _ -> Html.none
                 Html.p $"Output folder: {preview.OutputFolder}"
                 Html.p $"Manifest: {preview.ManifestPath}"
                 Html.p $"Final summary: {preview.FinalSummaryPath}"
@@ -236,7 +246,7 @@ let viewCollectPage (collect: CollectModel) (dispatch: Msg -> unit) =
         (viewCollectStep collect dispatch)
         collect.Error
         (showPreviousCollectButton collect.Step)
-        (collectPrimaryButtonText collect.Step)
+        (collectPrimaryButtonText collect)
         (disableCollectPrimaryButton collect)
         (fun () -> dispatch CancelCollectWizard)
         (fun () -> dispatch PreviousCollectStep)
