@@ -32,58 +32,60 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
     | Loaded batches when batches.IsEmpty -> Html.p "No collect batches available."
     | Loaded batches ->
         Html.div [
-            prop.className "overflow-x-auto"
+            prop.className "min-h-0"
             prop.children [
-                Html.table [
-                    prop.className "table table-zebra text-sm"
-                    prop.children [
-                        Html.thead [
-                            Html.tr [
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Select" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Seed base" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Created" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Runs" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Nodes" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Phase-spaces" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Run status" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Collect status" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Summary path" ]
-                            ]
-                        ]
-                        Html.tbody [
-                            for batch in batches do
-                                let selectable = isCollectBatchSelectable batch
-                                let selected = collect.SelectedSeedBase = Some batch.SeedBase
-
+                viewTableScroll (
+                    Html.table [
+                        prop.className "table table-zebra text-sm"
+                        prop.children [
+                            Html.thead [
                                 Html.tr [
-                                    prop.className (if selected then "bg-base-200" else "")
-                                    prop.children [
-                                        Html.td [
-                                            prop.className "border-b border-base-200 px-3 py-2"
-                                            prop.children [
-                                                Html.input [
-                                                    prop.type'.radio
-                                                    prop.className "radio radio-primary radio-sm"
-                                                    prop.name "collect-batch"
-                                                    prop.isChecked selected
-                                                    prop.disabled (not selectable)
-                                                    prop.onChange (fun (_: bool) -> dispatch (SelectCollectBatch batch.SeedBase))
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Select" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Seed base" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Created" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Runs" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Nodes" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Phase-spaces" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Run status" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Collect status" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Summary path" ]
+                                ]
+                            ]
+                            Html.tbody [
+                                for batch in batches do
+                                    let selectable = isCollectBatchSelectable batch
+                                    let selected = collect.SelectedSeedBase = Some batch.SeedBase
+
+                                    Html.tr [
+                                        prop.className (if selected then "bg-base-200" else "")
+                                        prop.children [
+                                            Html.td [
+                                                prop.className "border-b border-base-200 px-3 py-2"
+                                                prop.children [
+                                                    Html.input [
+                                                        prop.type'.radio
+                                                        prop.className "radio radio-primary radio-sm"
+                                                        prop.name "collect-batch"
+                                                        prop.isChecked selected
+                                                        prop.disabled (not selectable)
+                                                        prop.onChange (fun (_: bool) -> dispatch (SelectCollectBatch batch.SeedBase))
+                                                    ]
                                                 ]
                                             ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.SeedBase ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CreatedAt ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.GeneratedRunCount}" ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.NodeCount}" ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.PhaseSpaceCount}" ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg batch.RunStatus "-") ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CollectStatus ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2 break-all"; prop.text (defaultArg batch.CollectSummaryPath "-") ]
                                         ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.SeedBase ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CreatedAt ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.GeneratedRunCount}" ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.NodeCount}" ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.PhaseSpaceCount}" ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg batch.RunStatus "-") ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CollectStatus ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2 break-all"; prop.text (defaultArg batch.CollectSummaryPath "-") ]
                                     ]
-                                ]
+                            ]
                         ]
                     ]
-                ]
+                )
             ]
         ]
 
@@ -165,71 +167,82 @@ let viewCollectPreflight (collect: CollectModel) (dispatch: Msg -> unit) =
                                 ]
                             ]
                             Html.div [
-                                prop.className "overflow-x-auto"
+                                prop.className "max-h-[45vh]"
                                 prop.children [
-                                    Html.table [
-                                        prop.className "table table-zebra table-sm"
-                                        prop.children [
-                                            Html.thead [
-                                                Html.tr [
-                                                    Html.th "Run id"
-                                                    Html.th "Phase-space"
-                                                    Html.th "Node"
-                                                    Html.th "File kind"
-                                                    Html.th "Problem"
-                                                    Html.th "Message"
+                                    viewTableScroll (
+                                        Html.table [
+                                            prop.className "table table-zebra table-sm"
+                                            prop.children [
+                                                Html.thead [
+                                                    Html.tr [
+                                                        Html.th "Run id"
+                                                        Html.th "Phase-space"
+                                                        Html.th "Node"
+                                                        Html.th "File kind"
+                                                        Html.th "Problem"
+                                                        Html.th "Message"
+                                                    ]
+                                                ]
+                                                Html.tbody [
+                                                    for issue in preview.Preflight.FileIssues do
+                                                        Html.tr [
+                                                            Html.td issue.RunId
+                                                            Html.td issue.PhaseSpaceIndex
+                                                            Html.td issue.NodeDigit
+                                                            Html.td issue.FileKind
+                                                            Html.td issue.Problem
+                                                            Html.td (defaultArg issue.Message "-")
+                                                        ]
                                                 ]
                                             ]
-                                            Html.tbody [
-                                                for issue in preview.Preflight.FileIssues do
-                                                    Html.tr [
-                                                        Html.td issue.RunId
-                                                        Html.td issue.PhaseSpaceIndex
-                                                        Html.td issue.NodeDigit
-                                                        Html.td issue.FileKind
-                                                        Html.td issue.Problem
-                                                        Html.td (defaultArg issue.Message "-")
-                                                    ]
-                                            ]
                                         ]
-                                    ]
+                                    )
                                 ]
                             ]
                         ]
                     ]
-                Html.table [
-                    prop.className "table table-zebra text-sm"
-                    prop.children [
-                        Html.thead [
-                            Html.tr [
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Check" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Details" ]
-                            ]
-                        ]
-                        Html.tbody [
-                            for check in preview.Preflight.Checks do
+                viewTableScroll (
+                    Html.table [
+                        prop.className "table table-zebra text-sm"
+                        prop.children [
+                            Html.thead [
                                 Html.tr [
-                                    Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text check.Name ]
-                                    Html.td [
-                                        prop.className "border-b border-base-200 px-3 py-2"
-                                        prop.children [ Html.span [ prop.className (collectStatusClass check.Ok); prop.text (if check.Ok then "OK" else "Failed") ] ]
-                                    ]
-                                    Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg check.Message "-") ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Check" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Details" ]
                                 ]
+                            ]
+                            Html.tbody [
+                                for check in preview.Preflight.Checks do
+                                    Html.tr [
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text check.Name ]
+                                        Html.td [
+                                            prop.className "border-b border-base-200 px-3 py-2"
+                                            prop.children [ Html.span [ prop.className (collectStatusClass check.Ok); prop.text (if check.Ok then "OK" else "Failed") ] ]
+                                        ]
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg check.Message "-") ]
+                                    ]
+                            ]
                         ]
                     ]
-                ]
+                )
                 if preview.Preflight.MissingFiles.IsEmpty then
                     Html.none
                 else
                     Html.div [
                         Html.h4 [ prop.className "font-semibold"; prop.text "Missing files" ]
-                        Html.ul [
-                            prop.className "mt-2 list-disc pl-5 text-sm"
+                        Html.div [
+                            prop.className "mt-2 max-h-[30vh]"
                             prop.children [
-                                for missing in preview.Preflight.MissingFiles do
-                                    Html.li $"{missing.FileKind}: {missing.Path}"
+                                viewScrollPanel [
+                                    Html.ul [
+                                        prop.className "list-disc pl-5 text-sm"
+                                        prop.children [
+                                            for missing in preview.Preflight.MissingFiles do
+                                                Html.li [ prop.className "break-all"; prop.text $"{missing.FileKind}: {missing.Path}" ]
+                                        ]
+                                    ]
+                                ]
                             ]
                         ]
                     ]
@@ -260,11 +273,18 @@ let viewCollectMergeReview (collect: CollectModel) =
                 Html.p $"Effective phase-space count: {preview.Preflight.EffectivePhaseSpaceCount}"
                 Html.p $"Effective node count: {preview.Preflight.EffectiveNodeCount}"
                 Html.h4 [ prop.className "font-semibold"; prop.text "Planned merged files" ]
-                Html.ul [
-                    prop.className "list-disc pl-5"
+                Html.div [
+                    prop.className "max-h-[40vh]"
                     prop.children [
-                        for path in preview.PlannedMergedFiles do
-                            Html.li path
+                        viewScrollPanel [
+                            Html.ul [
+                                prop.className "list-disc pl-5"
+                                prop.children [
+                                    for path in preview.PlannedMergedFiles do
+                                        Html.li [ prop.className "break-all"; prop.text path ]
+                                ]
+                            ]
+                        ]
                     ]
                 ]
                 Html.p "Node merge: sums dose across nodes and reports node mean, SD, SEM, and relative SEM."
@@ -287,15 +307,25 @@ let viewCollectResult (collect: CollectModel) =
                 Html.p $"CSV files read: {value.CsvReadCount}"
                 Html.p $"Logs found: {value.LogFoundCount}"
                 Html.p $"Merged phase-space count: {value.MergedPhaseSpaceCount}"
-                Html.p $"Output folder: {value.OutputFolder}"
-                Html.p $"Summary path: {value.SummaryPath}"
-                Html.p $"Manifest path: {value.ManifestPath}"
+                Html.p [ prop.className "break-all"; prop.text $"Output folder: {value.OutputFolder}" ]
+                Html.p [ prop.className "break-all"; prop.text $"Summary path: {value.SummaryPath}" ]
+                Html.p [ prop.className "break-all"; prop.text $"Manifest path: {value.ManifestPath}" ]
                 Html.h4 [ prop.className "font-semibold"; prop.text "Merged files" ]
-                Html.ul [
-                    prop.className "list-disc pl-5"
+                Html.div [
+                    prop.className "max-h-[40vh]"
                     prop.children [
-                        for merged in value.MergedFiles do
-                            Html.li $"{merged.PhaseSpaceIndex}: {merged.MergedFilePath} (source csv count: {merged.SourceCsvCount})"
+                        viewScrollPanel [
+                            Html.ul [
+                                prop.className "list-disc pl-5"
+                                prop.children [
+                                    for merged in value.MergedFiles do
+                                        Html.li [
+                                            prop.className "break-all"
+                                            prop.text $"{merged.PhaseSpaceIndex}: {merged.MergedFilePath} (source csv count: {merged.SourceCsvCount})"
+                                        ]
+                                ]
+                            ]
+                        ]
                     ]
                 ]
             ]

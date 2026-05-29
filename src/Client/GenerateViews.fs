@@ -64,23 +64,30 @@ let viewComponents (generate: GenerateModel) (dispatch: Msg -> unit) =
     | Loaded files when files.IsEmpty -> Html.p "No template files available."
     | Loaded files ->
         Html.div [
-            for groupName, groupedFiles in groupTemplateFiles files do
-                Html.div [
-                    prop.className "mb-4"
-                    prop.children [
-                        Html.h3 [ prop.className "font-semibold"; prop.text groupName ]
-                        Html.div [
-                            prop.className "mt-2"
-                            prop.children [
-                                for templateFile in groupedFiles do
-                                    checkBoxRow
-                                        (generate.SelectedComponents.Contains templateFile.RelativePath)
-                                        templateFile.FileName
-                                        (fun () -> dispatch (ToggleComponent templateFile.RelativePath))
+            prop.className "max-h-full min-h-0"
+            prop.children [
+                viewScrollPanel [
+                    Html.div [
+                        for groupName, groupedFiles in groupTemplateFiles files do
+                            Html.div [
+                                prop.className "mb-4"
+                                prop.children [
+                                    Html.h3 [ prop.className "font-semibold"; prop.text groupName ]
+                                    Html.div [
+                                        prop.className "mt-2"
+                                        prop.children [
+                                            for templateFile in groupedFiles do
+                                                checkBoxRow
+                                                    (generate.SelectedComponents.Contains templateFile.RelativePath)
+                                                    templateFile.FileName
+                                                    (fun () -> dispatch (ToggleComponent templateFile.RelativePath))
+                                        ]
+                                    ]
+                                ]
                             ]
-                        ]
                     ]
                 ]
+            ]
         ]
 
 /// Renders the node selection step.
@@ -104,11 +111,18 @@ let viewNodes (generate: GenerateModel) (dispatch: Msg -> unit) =
                 ]
             ]
             Html.div [
-                prop.className "grid gap-1 md:grid-cols-2"
+                prop.className "max-h-full min-h-0"
                 prop.children [
-                    for node in config.Nodes |> List.sortBy _.Digit do
-                        checkBoxRow (generate.SelectedNodes.Contains node.Digit) $"{node.Digit} {node.Name}" (fun () ->
-                            dispatch (ToggleNode node.Digit))
+                    viewScrollPanel [
+                        Html.div [
+                            prop.className "grid gap-1 md:grid-cols-2"
+                            prop.children [
+                                for node in config.Nodes |> List.sortBy _.Digit do
+                                    checkBoxRow (generate.SelectedNodes.Contains node.Digit) $"{node.Digit} {node.Name}" (fun () ->
+                                        dispatch (ToggleNode node.Digit))
+                            ]
+                        ]
+                    ]
                 ]
             ]
         ]
@@ -135,13 +149,20 @@ let viewPhaseSpaceFiles (generate: GenerateModel) (dispatch: Msg -> unit) =
                 ]
             ]
             Html.div [
-                prop.className "grid max-h-[50vh] gap-1 overflow-y-auto pr-2 md:grid-cols-2"
+                prop.className "max-h-full min-h-0"
                 prop.children [
-                    for phaseSpaceFile in config.PhaseSpaceFiles |> List.sortBy _.Index do
-                        checkBoxRow
-                            (generate.SelectedPhaseSpaceFiles.Contains phaseSpaceFile.Index)
-                            $"ps{phaseSpaceFile.Index}"
-                            (fun () -> dispatch (TogglePhaseSpaceFile phaseSpaceFile.Index))
+                    viewScrollPanel [
+                        Html.div [
+                            prop.className "grid gap-1 pr-2 md:grid-cols-2"
+                            prop.children [
+                                for phaseSpaceFile in config.PhaseSpaceFiles |> List.sortBy _.Index do
+                                    checkBoxRow
+                                        (generate.SelectedPhaseSpaceFiles.Contains phaseSpaceFile.Index)
+                                        $"ps{phaseSpaceFile.Index}"
+                                        (fun () -> dispatch (TogglePhaseSpaceFile phaseSpaceFile.Index))
+                            ]
+                        ]
+                    ]
                 ]
             ]
         ]
@@ -174,11 +195,18 @@ let viewReview (generate: GenerateModel) =
                         prop.text "No components selected."
                     ]
                 else
-                    Html.ul [
-                        prop.className "mt-1 list-disc pl-6"
+                    Html.div [
+                        prop.className "mt-1 max-h-[40vh]"
                         prop.children [
-                            for componentPath in selectedComponents do
-                                Html.li componentPath
+                            viewScrollPanel [
+                                Html.ul [
+                                    prop.className "list-disc pl-6"
+                                    prop.children [
+                                        for componentPath in selectedComponents do
+                                            Html.li [ prop.className "break-all"; prop.text componentPath ]
+                                    ]
+                                ]
+                            ]
                         ]
                     ]
             ]
@@ -207,9 +235,9 @@ let viewReview (generate: GenerateModel) =
         match generate.Preview with
         | NotStarted -> Html.p "No preview available."
         | Loading(Some preview) ->
-            Html.pre [
-                prop.className "mt-2 max-h-72 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
-                prop.text preview.StitchedPreviewText
+            Html.div [
+                prop.className "mt-2"
+                prop.children [ viewCodeScroll preview.StitchedPreviewText ]
             ]
         | Loading _ -> Html.p "Loading preview..."
         | Loaded preview ->
@@ -219,9 +247,9 @@ let viewReview (generate: GenerateModel) =
                         prop.className "mt-2 text-sm"
                         prop.text $"Expected generated count: {preview.ExpectedGeneratedCount}"
                     ]
-                    Html.pre [
-                        prop.className "mt-2 max-h-72 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
-                        prop.text preview.StitchedPreviewText
+                    Html.div [
+                        prop.className "mt-2"
+                        prop.children [ viewCodeScroll preview.StitchedPreviewText ]
                     ]
                 ]
             ]
@@ -244,11 +272,21 @@ let viewResult (generate: GenerateModel) =
             if generated.GeneratedRuns.IsEmpty then
                 Html.p [ prop.className "mt-2"; prop.text "No generated runs returned yet." ]
             else
-                Html.ul [
-                    prop.className "mt-2 list-disc pl-6"
+                Html.div [
+                    prop.className "mt-2 max-h-[45vh]"
                     prop.children [
-                        for run in generated.GeneratedRuns do
-                            Html.li $"{run.RunId} | input: {run.InputFilePath} | output: {run.OutputFilePath} | run folder: {run.RunFolder}"
+                        viewScrollPanel [
+                            Html.ul [
+                                prop.className "list-disc pl-6"
+                                prop.children [
+                                    for run in generated.GeneratedRuns do
+                                        Html.li [
+                                            prop.className "break-all"
+                                            prop.text $"{run.RunId} | input: {run.InputFilePath} | output: {run.OutputFilePath} | run folder: {run.RunFolder}"
+                                        ]
+                                ]
+                            ]
+                        ]
                     ]
                 ]
         ]

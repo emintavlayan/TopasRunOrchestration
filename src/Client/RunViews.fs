@@ -53,56 +53,58 @@ let viewSelectBatch (run: RunModel) (dispatch: Msg -> unit) =
     | Loaded batches when batches.IsEmpty -> Html.p "No generated batches found."
     | Loaded batches ->
         Html.div [
-            prop.className "overflow-x-auto"
+            prop.className "min-h-0"
             prop.children [
-                Html.table [
-                    prop.className "table table-zebra text-sm"
-                    prop.children [
-                        Html.thead [
-                            Html.tr [
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Select" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Seed base" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Created" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Inputs" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Nodes" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Phase-space files" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Slurm job id" ]
-                            ]
-                        ]
-                        Html.tbody [
-                            for batch in batches do
-                                let isSelectable = isBatchSelectable batch
-                                let isSelected = run.SelectedSeedBase = Some batch.SeedBase
-
+                viewTableScroll (
+                    Html.table [
+                        prop.className "table table-zebra text-sm"
+                        prop.children [
+                            Html.thead [
                                 Html.tr [
-                                    prop.className (if isSelected then "bg-base-200" else "")
-                                    prop.children [
-                                        Html.td [
-                                            prop.className "border-b border-base-200 px-3 py-2"
-                                            prop.children [
-                                                Html.input [
-                                                    prop.type'.radio
-                                                    prop.className "radio radio-primary radio-sm"
-                                                    prop.name "run-batch"
-                                                    prop.isChecked isSelected
-                                                    prop.disabled (not isSelectable)
-                                                    prop.onChange (fun (_: bool) -> dispatch (SelectRunBatch batch.SeedBase))
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Select" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Seed base" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Created" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Inputs" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Nodes" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Phase-space files" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Slurm job id" ]
+                                ]
+                            ]
+                            Html.tbody [
+                                for batch in batches do
+                                    let isSelectable = isBatchSelectable batch
+                                    let isSelected = run.SelectedSeedBase = Some batch.SeedBase
+
+                                    Html.tr [
+                                        prop.className (if isSelected then "bg-base-200" else "")
+                                        prop.children [
+                                            Html.td [
+                                                prop.className "border-b border-base-200 px-3 py-2"
+                                                prop.children [
+                                                    Html.input [
+                                                        prop.type'.radio
+                                                        prop.className "radio radio-primary radio-sm"
+                                                        prop.name "run-batch"
+                                                        prop.isChecked isSelected
+                                                        prop.disabled (not isSelectable)
+                                                        prop.onChange (fun (_: bool) -> dispatch (SelectRunBatch batch.SeedBase))
+                                                    ]
                                                 ]
                                             ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.SeedBase ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CreatedAt ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.GeneratedInputCount}" ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.NodeCount}" ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.PhaseSpaceCount}" ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.RunStatus ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg batch.SlurmJobId "-") ]
                                         ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.SeedBase ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CreatedAt ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.GeneratedInputCount}" ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.NodeCount}" ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.PhaseSpaceCount}" ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.RunStatus ]
-                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg batch.SlurmJobId "-") ]
                                     ]
-                                ]
+                            ]
                         ]
                     ]
-                ]
+                )
             ]
         ]
 
@@ -115,32 +117,34 @@ let viewPreflight (run: RunModel) =
         Html.div [
             prop.className "space-y-3"
             prop.children [
-                Html.table [
-                    prop.className "table table-zebra text-sm"
-                    prop.children [
-                        Html.thead [
-                            Html.tr [
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Check" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
-                                Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Message" ]
+                viewTableScroll (
+                    Html.table [
+                        prop.className "table table-zebra text-sm"
+                        prop.children [
+                            Html.thead [
+                                Html.tr [
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Check" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Status" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Message" ]
+                                ]
+                            ]
+                            Html.tbody [
+                                for check in preview.Preflight.Checks do
+                                    Html.tr [
+                                        Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text check.Name ]
+                                        Html.td [
+                                            prop.className "border-b border-base-200 px-3 py-2"
+                                            prop.children [ Html.span [ prop.className (preflightStatusClass check.Ok); prop.text (if check.Ok then "OK" else "Failed") ] ]
+                                        ]
+                                        Html.td [
+                                            prop.className "border-b border-base-200 px-3 py-2 text-base-content/80"
+                                            prop.text (defaultArg check.Message "-")
+                                        ]
+                                    ]
                             ]
                         ]
-                        Html.tbody [
-                            for check in preview.Preflight.Checks do
-                                Html.tr [
-                                    Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text check.Name ]
-                                    Html.td [
-                                        prop.className "border-b border-base-200 px-3 py-2"
-                                        prop.children [ Html.span [ prop.className (preflightStatusClass check.Ok); prop.text (if check.Ok then "OK" else "Failed") ] ]
-                                    ]
-                                    Html.td [
-                                        prop.className "border-b border-base-200 px-3 py-2 text-base-content/80"
-                                        prop.text (defaultArg check.Message "-")
-                                    ]
-                                ]
-                        ]
                     ]
-                ]
+                )
             ]
         ]
 
@@ -181,10 +185,7 @@ let viewSlurmScript (appRoot: string option) (run: RunModel) =
                                     ]
                                 ]
                             ]
-                            Html.pre [
-                                prop.className "max-h-80 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
-                                prop.text nodePreview.ScriptText
-                            ]
+                            viewCodeScroll nodePreview.ScriptText
                         ]
                     ]
                 | None ->
@@ -209,12 +210,9 @@ let viewRunResult (run: RunModel) =
                 Html.p [ prop.className "font-semibold text-emerald-700"; prop.text "Batch submitted." ]
                 Html.p [ prop.text $"Slurm job ids: {jobIdsText}" ]
                 Html.p [ prop.text $"Submitted run count: {resultValue.SubmittedRunCount}" ]
-                Html.p [ prop.text $"Manifest path: {resultValue.ManifestPath}" ]
-                Html.p [ prop.text $"Script path: {resultValue.ScriptPath}" ]
-                Html.pre [
-                    prop.className "max-h-72 overflow-auto rounded-box bg-base-200 p-3 font-mono text-xs"
-                    prop.text resultValue.SbatchOutput
-                ]
+                Html.p [ prop.className "break-all"; prop.text $"Manifest path: {resultValue.ManifestPath}" ]
+                Html.p [ prop.className "break-all"; prop.text $"Script path: {resultValue.ScriptPath}" ]
+                viewCodeScroll resultValue.SbatchOutput
             ]
         ]
     | _ ->
