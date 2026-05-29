@@ -27,6 +27,13 @@ let private toConnectionString (settings: TsebtSettings) : string =
     builder.DataSource <- databasePath
     builder.ConnectionString
 
+/// Returns one UTC timestamp string used by collect logs.
+let private collectLogTimestampUtc () : string = DateTime.UtcNow.ToString("O")
+
+/// Writes one collect operation stage log line to stdout.
+let private logCollectStage (seedBase: string) (stage: string) (message: string) : unit =
+    Console.WriteLine($"[{collectLogTimestampUtc()}] [Collect] [seedBase={seedBase}] [{stage}] {message}")
+
 /// Reads collect batch summaries from generated batch and run metadata.
 let private readCollectBatchSummaries (connection: SqliteConnection) : Result<CollectBatchSummary list, string> =
     try
@@ -275,7 +282,17 @@ let private mergePhaseSpaceCsvFiles
         let outputPath = Path.Combine(mergedOutputFolderPath settings seedBase, $"phsp{phaseSpaceIndex}_merged.csv")
 
         result {
+            logCollectStage
+                seedBase
+                "MergePhaseSpaceStart"
+                $"phaseSpaceIndex={phaseSpaceIndex}; sourceCsvCount={csvInputPaths.Length}"
+
             do! mergeNodeCsvFilesForPhaseSpace csvInputPaths outputPath
+
+            logCollectStage
+                seedBase
+                "MergePhaseSpaceEnd"
+                $"phaseSpaceIndex={phaseSpaceIndex}; sourceCsvCount={csvInputPaths.Length}; output={outputPath}"
 
             return
                 {
@@ -323,6 +340,7 @@ let private updateCollectedBatchMetadata
 /// Executes full collect operation for one seed base.
 let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<CollectResult, string> =
     try
+        logCollectStage request.SeedBase "Start" "Collect batch request received."
         use connection = new SqliteConnection(toConnectionString settings)
         connection.Open()
 
@@ -334,6 +352,10 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
 
             let! rows = readCollectRunRows connection request.SeedBase
             let preflight = buildCollectPreflightResult settings request.SeedBase rows
+            logCollectStage
+                request.SeedBase
+                "Preflight"
+                $"expectedRuns={preflight.ExpectedRunCount}; csvFound={preflight.FoundCsvCount}; csvMissing={preflight.MissingCsvCount}; logFound={preflight.FoundLogCount}; logMissing={preflight.MissingLogCount}; canCollect={preflight.CanCollect}"
 
             if not preflight.CanCollect then
                 return! Error $"Collect preflight failed for seed base: {request.SeedBase}"
@@ -344,16 +366,33 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
             let plannedMergedFilesList = plannedMergedFiles settings request.SeedBase rows
 
             do! validateCollectOutputCollisions plannedMergedFilesList summaryPath
+            logCollectStage request.SeedBase "CollisionValidation" "Output collision validation passed."
 
-            let manifestLines = buildCollectManifestLines rows
-            do! writeCollectManifest manifestPath manifestLines
+            logCollectStage request.SeedBase "MergeStart" "Starting phase-space CSV merge."
 
             let! mergedFiles = mergePhaseSpaceCsvFiles settings request.SeedBase rows
             let mergedPaths = mergedFiles |> List.map _.MergedFilePath
-            do! computeDoseSummary mergedPaths summaryPath
 
+            logCollectStage
+                request.SeedBase
+                "MergeEnd"
+                $"Merged phase-space files count={mergedFiles.Length}."
+
+            logCollectStage request.SeedBase "SummaryStart" $"Computing dose summary: {summaryPath}"
+            do! computeDoseSummary mergedPaths summaryPath
+            logCollectStage request.SeedBase "SummaryEnd" $"Dose summary written: {summaryPath}"
+
+            let manifestLines = buildCollectManifestLines rows
+            logCollectStage request.SeedBase "ManifestWriteStart" $"Writing collect manifest: {manifestPath}"
+            do! writeCollectManifest manifestPath manifestLines
+            logCollectStage request.SeedBase "ManifestWriteEnd" $"Collect manifest written: {manifestPath}"
+
+            logCollectStage request.SeedBase "DatabaseUpdateStart" "Updating generated batch collect metadata."
             let! _collectedAt =
                 updateCollectedBatchMetadata connection request.SeedBase outputFolder summaryPath preflight
+            logCollectStage request.SeedBase "DatabaseUpdateEnd" "Generated batch collect metadata updated."
+
+            logCollectStage request.SeedBase "Success" "Collect completed successfully."
 
             return
                 {
@@ -370,4 +409,5 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
                 }
         }
     with ex ->
+        logCollectStage request.SeedBase "Exception" $"Collect failed with exception: {ex.Message}"
         Error $"Failed executing collect operation: {ex.Message}"
