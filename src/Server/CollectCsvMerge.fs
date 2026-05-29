@@ -3,6 +3,7 @@ module CollectCsvMerge
 open System
 open System.Globalization
 open System.IO
+open System.Text
 open FsToolkit.ErrorHandling
 
 /// Represents parsed csv content used for safe phase-space merge.
@@ -11,6 +12,23 @@ type ParsedMergeCsv = {
     DataRows: string array list
     DoseColumnIndex: int
     DoseColumnName: string option
+}
+
+/// Represents the header preamble and first data row extracted from one csv stream.
+type private MergeCsvPreamble = {
+    HeaderLines: string list
+    FirstDataRow: string array
+}
+
+/// Represents one streaming merge source file with reader state.
+type private StreamingMergeSource = {
+    Path: string
+    Reader: StreamReader
+    HeaderLines: string list
+    DoseColumnIndex: int
+    DoseColumnName: string option
+    DataColumnCount: int
+    mutable PendingDataRow: string array option
 }
 
 /// Splits one csv line into comma-separated columns.
@@ -28,6 +46,15 @@ let private tryParseFloat (value: string) : bool =
     let mutable parsed = 0.0
     Double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, &parsed)
 
+/// Parses one floating-point value using invariant culture.
+let private parseDoseCell (value: string) : Result<float, string> =
+    let mutable parsed = 0.0
+
+    if Double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, &parsed) then
+        Ok parsed
+    else
+        Error $"Failed parsing numeric value '{value}'."
+
 /// Finds the last numeric column index in one row.
 let private lastNumericColumnIndex (columns: string array) : int option =
     columns
@@ -44,7 +71,6 @@ let private preferredDoseHeaderNames: string list =
     [
         "dose_sum_gy"
         "dose_gy"
-        "dose"
         "dose"
         "dosetomedium"
         "dose_to_medium"
@@ -69,18 +95,6 @@ let private isDoseColumnNumericAcrossRows (doseColumnIndex: int) (rows: string a
     rows
     |> List.forall (fun row -> doseColumnIndex < row.Length && tryParseFloat row[doseColumnIndex])
 
-/// Appends one parsed csv line into header or data buffers.
-let private appendParsedLine
-    (headerLines: ResizeArray<string>)
-    (dataRows: ResizeArray<string array>)
-    (line: string)
-    : unit =
-    let columns = splitCsvLine line
-
-    match lastNumericColumnIndex columns with
-    | Some _ -> dataRows.Add columns
-    | None -> headerLines.Add line
-
 /// Parses csv text into header lines, data rows, and dose column index.
 let parseCsvForMerge (csvText: string) : Result<ParsedMergeCsv, string> =
     let lines =
@@ -89,7 +103,13 @@ let parseCsvForMerge (csvText: string) : Result<ParsedMergeCsv, string> =
 
     let headerBuffer = ResizeArray<string>()
     let dataBuffer = ResizeArray<string array>()
-    lines |> Array.iter (appendParsedLine headerBuffer dataBuffer)
+
+    for line in lines do
+        let columns = splitCsvLine line
+
+        match lastNumericColumnIndex columns with
+        | Some _ -> dataBuffer.Add columns
+        | None -> headerBuffer.Add line
 
     let headerLines = headerBuffer |> Seq.toList
     let dataRows = dataBuffer |> Seq.toList
@@ -143,94 +163,144 @@ let parseCsvForMerge (csvText: string) : Result<ParsedMergeCsv, string> =
                         Error "Fallback dose column is not numeric across all rows."
                 | None -> Error "CSV dose column could not be determined."
 
-/// Validates that parsed csv rows align with the first parsed file structure.
-let private validateSameShape
-    (expectedRowCount: int)
-    (expectedColumnCount: int)
-    (candidateRows: string array list)
-    : Result<unit, string> =
-    if candidateRows.Length <> expectedRowCount then
-        Error $"CSV row count mismatch. Expected {expectedRowCount}, got {candidateRows.Length}."
-    elif candidateRows |> List.exists (fun row -> row.Length <> expectedColumnCount) then
-        Error "CSV column count mismatch in one or more data rows."
-    else
-        Ok()
-
-/// Represents node-level dose statistics for one merged voxel row.
-type private NodeDoseStats = {
-    Sum: float
-    Mean: float
-    StandardDeviation: float
-    StandardError: float
-    RelativeStandardErrorPercent: float
-    Count: int
-}
-
-/// Parses one dose cell value using invariant culture.
-let private parseDoseCell (value: string) : Result<float, string> =
-    let mutable parsed = 0.0
-
-    if Double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, &parsed) then
-        Ok parsed
-    else
-        Error $"Failed parsing dose value '{value}'."
-
-/// Returns sample standard deviation for node dose values.
-let private sampleStandardDeviation (values: float list) (mean: float) : float =
-    match values with
-    | []
-    | [ _ ] -> 0.0
-    | _ ->
-        let sumSquares = values |> List.sumBy (fun value -> pown (value - mean) 2)
-        sqrt (sumSquares / float (values.Length - 1))
-
 /// Returns zero when a value is NaN or infinity.
 let private finiteOrZero (value: float) : float =
     if Double.IsNaN value || Double.IsInfinity value then 0.0 else value
-
-/// Computes node-level dose statistics for one merged voxel row.
-let private computeNodeDoseStats (doseValues: float list) : NodeDoseStats =
-    let count = doseValues.Length
-    let sumDose = doseValues |> List.sum
-    let meanDose = if count = 0 then 0.0 else sumDose / float count
-    let sdDose = sampleStandardDeviation doseValues meanDose
-    let semDose = if count < 2 then 0.0 else sdDose / sqrt (float count)
-
-    let relSemPercent =
-        if meanDose = 0.0 then
-            0.0
-        else
-            100.0 * semDose / abs meanDose
-
-    {
-        Sum = finiteOrZero sumDose
-        Mean = finiteOrZero meanDose
-        StandardDeviation = finiteOrZero sdDose
-        StandardError = finiteOrZero semDose
-        RelativeStandardErrorPercent = finiteOrZero relSemPercent
-        Count = count
-    }
 
 /// Formats one floating-point value using invariant culture.
 let private formatFloat (value: float) : string =
     finiteOrZero value
     |> fun safeValue -> safeValue.ToString("G17", CultureInfo.InvariantCulture)
 
+/// Tries to read one next non-blank csv row from a stream reader.
+let private tryReadNextNonBlankRow (reader: StreamReader) : string array option =
+    let mutable nextRow: string array option = None
+    let mutable continueReading = true
+
+    while continueReading && not reader.EndOfStream do
+        let line = reader.ReadLine()
+
+        if not (isNull line) && not (String.IsNullOrWhiteSpace line) then
+            nextRow <- Some(splitCsvLine line)
+            continueReading <- false
+
+    nextRow
+
+/// Reads header lines and the first numeric data row from one csv stream.
+let private readHeaderAndFirstDataRow
+    (reader: StreamReader)
+    (path: string)
+    : Result<MergeCsvPreamble, string> =
+    let headers = ResizeArray<string>()
+    let mutable firstDataRow: string array option = None
+    let mutable continueReading = true
+
+    while continueReading && not reader.EndOfStream do
+        let line = reader.ReadLine()
+
+        if not (isNull line) && not (String.IsNullOrWhiteSpace line) then
+            let columns = splitCsvLine line
+
+            match lastNumericColumnIndex columns with
+            | Some _ ->
+                firstDataRow <- Some columns
+                continueReading <- false
+            | None -> headers.Add line
+
+    match firstDataRow with
+    | Some row ->
+        Ok
+            {
+                HeaderLines = headers |> Seq.toList
+                FirstDataRow = row
+            }
+    | None -> Error $"CSV did not contain any numeric data rows: {path}"
+
+/// Resolves a dose column using header priority or first-row numeric fallback.
+let private resolveDoseColumnFromHeaderOrFallback
+    (path: string)
+    (headerLines: string list)
+    (firstDataRow: string array)
+    : Result<int * string option, string> =
+    let expectedColumnCount = firstDataRow.Length
+
+    let usableHeaderColumns =
+        match headerLines |> List.tryLast with
+        | Some lastHeaderLine ->
+            let columns = splitCsvLine lastHeaderLine
+            if columns.Length = expectedColumnCount then Some columns else None
+        | None -> None
+
+    match usableHeaderColumns with
+    | Some headerColumns ->
+        match tryResolveDoseColumnFromHeader headerColumns with
+        | Some(doseColumnIndex, doseColumnName) -> Ok(doseColumnIndex, Some doseColumnName)
+        | None ->
+            let headerText = headerColumns |> Array.map _.Trim() |> String.concat ", "
+            Error $"Unable to locate dose column from header in '{path}'. Header columns: {headerText}"
+    | None ->
+        match lastNumericColumnIndex firstDataRow with
+        | Some doseColumnIndex -> Ok(doseColumnIndex, None)
+        | None -> Error $"CSV dose column could not be determined for '{path}'."
+
+/// Creates one streaming source descriptor from an opened csv stream.
+let private createStreamingMergeSource (path: string) (reader: StreamReader) : Result<StreamingMergeSource, string> =
+    result {
+        let! preamble = readHeaderAndFirstDataRow reader path
+        let! doseColumnIndex, doseColumnName =
+            resolveDoseColumnFromHeaderOrFallback path preamble.HeaderLines preamble.FirstDataRow
+
+        if doseColumnIndex >= preamble.FirstDataRow.Length then
+            return! Error $"Dose column index {doseColumnIndex} is out of bounds for '{path}'."
+
+        let! _ = parseDoseCell preamble.FirstDataRow[doseColumnIndex]
+
+        return
+            {
+                Path = path
+                Reader = reader
+                HeaderLines = preamble.HeaderLines
+                DoseColumnIndex = doseColumnIndex
+                DoseColumnName = doseColumnName
+                DataColumnCount = preamble.FirstDataRow.Length
+                PendingDataRow = Some preamble.FirstDataRow
+            }
+    }
+
+/// Opens one csv reader for streaming merge.
+let private openCsvReader (path: string) : Result<StreamReader, string> =
+    try
+        Ok(new StreamReader(path))
+    with ex ->
+        Error $"Failed opening csv file '{path}': {ex.Message}"
+
+/// Returns the next data row from a streaming source including its pending first row.
+let private readNextDataRow (source: StreamingMergeSource) : string array option =
+    match source.PendingDataRow with
+    | Some pending ->
+        source.PendingDataRow <- None
+        Some pending
+    | None -> tryReadNextNonBlankRow source.Reader
+
 /// Builds merged output header lines with node diagnostic columns.
-let private buildMergedOutputHeaderLines (parsed: ParsedMergeCsv) : string list =
-    match parsed.HeaderLines with
+let private buildMergedOutputHeaderLines
+    (headerLines: string list)
+    (dataColumnCount: int)
+    (doseColumnIndex: int)
+    : string list =
+    match headerLines with
     | [] -> []
-    | headerLines ->
+    | _ ->
         let lastLine = headerLines |> List.last
         let lastColumns = splitCsvLine lastLine
 
-        if lastColumns.Length = parsed.DataRows.Head.Length then
+        if lastColumns.Length = dataColumnCount then
             let prefixLines = headerLines |> List.take (headerLines.Length - 1)
 
             let preservedColumns =
                 lastColumns
                 |> Array.mapi (fun index value -> index, value)
-                |> Array.choose (fun (index, value) -> if index = parsed.DoseColumnIndex then None else Some value)
+                |> Array.choose (fun (index, value) -> if index = doseColumnIndex then None else Some value)
                 |> String.concat ","
 
             prefixLines
@@ -240,99 +310,211 @@ let private buildMergedOutputHeaderLines (parsed: ParsedMergeCsv) : string list 
         else
             headerLines
 
+/// Computes sample standard deviation from count, sum, and sum-of-squares.
+let private sampleStandardDeviationFromMoments (count: int) (sum: float) (sumSquares: float) : float =
+    if count < 2 then
+        0.0
+    else
+        let numerator = sumSquares - ((sum * sum) / float count)
+        let variance = Math.Max(0.0, numerator / float (count - 1))
+        sqrt variance
+
 /// Builds one merged output row preserving non-dose columns and appending node diagnostics.
-let private buildMergedOutputRow (baseRow: string array) (doseColumnIndex: int) (doseValues: float list) : string =
-    let preservedColumns =
-        baseRow
-        |> Array.mapi (fun index value -> index, value)
-        |> Array.choose (fun (index, value) -> if index = doseColumnIndex then None else Some value)
-        |> Array.toList
+let private buildMergedOutputRow
+    (baseRow: string array)
+    (doseColumnIndex: int)
+    (sumDose: float)
+    (meanDose: float)
+    (sdDose: float)
+    (semDose: float)
+    (relSemPercent: float)
+    (count: int)
+    : string =
+    let builder = StringBuilder()
 
-    let stats = computeNodeDoseStats doseValues
+    for index in 0 .. baseRow.Length - 1 do
+        if index <> doseColumnIndex then
+            if builder.Length > 0 then
+                builder.Append(',') |> ignore
 
-    [
-        yield! preservedColumns
-        formatFloat stats.Sum
-        formatFloat stats.Mean
-        formatFloat stats.StandardDeviation
-        formatFloat stats.StandardError
-        formatFloat stats.RelativeStandardErrorPercent
-        string stats.Count
-    ]
-    |> String.concat ","
+            builder.Append(baseRow[index]) |> ignore
+
+    builder.Append(',').Append(formatFloat sumDose) |> ignore
+    builder.Append(',').Append(formatFloat meanDose) |> ignore
+    builder.Append(',').Append(formatFloat sdDose) |> ignore
+    builder.Append(',').Append(formatFloat semDose) |> ignore
+    builder.Append(',').Append(formatFloat relSemPercent) |> ignore
+    builder.Append(',').Append(count) |> ignore
+    builder.ToString()
+
+/// Disposes all stream readers in a best-effort way.
+let private disposeReaders (readers: ResizeArray<StreamReader>) : unit =
+    for reader in readers do
+        try
+            reader.Dispose()
+        with _ ->
+            ()
 
 /// Merges csv files for one phase-space and writes the merged csv output file.
 let mergeNodeCsvFilesForPhaseSpace (inputCsvPaths: string list) (outputCsvPath: string) : Result<unit, string> =
-    result {
+    if inputCsvPaths.IsEmpty then
+        Error "No input csv files were provided for merge."
+    else
         logCollectMergeStage
             "Start"
             $"inputCsvCount={inputCsvPaths.Length}; outputCsvPath={outputCsvPath}"
 
-        let! parsedInputs =
-            inputCsvPaths
-            |> List.map (fun path -> result {
-                logCollectMergeStage "ReadParseInputStart" $"path={path}"
+        let readers = ResizeArray<StreamReader>()
 
-                let! text =
-                    try
-                        File.ReadAllText path |> Ok
-                    with ex ->
-                        Error $"Failed reading csv file '{path}': {ex.Message}"
+        try
+            result {
+                let! sources =
+                    inputCsvPaths
+                    |> List.map (fun path -> result {
+                        logCollectMergeStage "ReadParseInputStart" $"path={path}"
+                        let! reader = openCsvReader path
 
-                let! parsed = parseCsvForMerge text
-                logCollectMergeStage "ReadParseInputEnd" $"path={path}; rowCount={parsed.DataRows.Length}"
-                return path, parsed
-            })
-            |> List.sequenceResultM
+                        readers.Add reader
 
-        match parsedInputs with
-        | [] -> return! Error "No input csv files were provided for merge."
-        | (_, firstParsed) :: otherParsed ->
-            let expectedRows = firstParsed.DataRows.Length
-            let expectedCols = firstParsed.DataRows.Head.Length
-            logCollectMergeStage "FirstInputShape" $"rowCount={expectedRows}; columnCount={expectedCols}"
+                        let! source = createStreamingMergeSource path reader
+                        let doseNameText = defaultArg source.DoseColumnName "(fallback-last-numeric)"
 
-            do!
-                otherParsed
-                |> List.map (fun (_, parsed) -> validateSameShape expectedRows expectedCols parsed.DataRows)
-                |> List.sequenceResultM
-                |> Result.map (fun _ -> ())
+                        logCollectMergeStage
+                            "DoseColumnResolved"
+                            $"path={path}; doseColumnIndex={source.DoseColumnIndex}; doseColumnName={doseNameText}; dataColumnCount={source.DataColumnCount}"
 
-            let parsedFiles = firstParsed :: (otherParsed |> List.map snd)
-            logCollectMergeStage "MergeRowsStart" $"rowCount={expectedRows}; fileCount={parsedFiles.Length}"
+                        return source
+                    })
+                    |> List.sequenceResultM
+                    |> Result.map List.toArray
 
-            let! mergedRows =
-                [ 0 .. expectedRows - 1 ]
-                |> List.map (fun rowIndex -> result {
-                    let baseRow = firstParsed.DataRows[rowIndex]
+                let firstSource = sources[0]
+                let expectedColumnCount = firstSource.DataColumnCount
 
-                    let! doseValues =
-                        parsedFiles
-                        |> List.map (fun parsed ->
-                            let value = parsed.DataRows[rowIndex][parsed.DoseColumnIndex]
-                            parseDoseCell value)
-                        |> List.sequenceResultM
+                match
+                    sources
+                    |> Array.tryFind (fun source -> source.DataColumnCount <> expectedColumnCount)
+                with
+                | Some source ->
+                    return!
+                        Error
+                            $"CSV column count mismatch between files. Expected {expectedColumnCount}, got {source.DataColumnCount} for '{source.Path}'."
+                | None -> ()
 
-                    return buildMergedOutputRow baseRow firstParsed.DoseColumnIndex doseValues
-                })
-                |> List.sequenceResultM
-            logCollectMergeStage "MergeRowsEnd" $"mergedRowCount={mergedRows.Length}"
+                let parentFolder = Path.GetDirectoryName outputCsvPath
 
-            let outputLines =
-                (buildMergedOutputHeaderLines firstParsed @ mergedRows)
-                |> String.concat Environment.NewLine
+                if not (String.IsNullOrWhiteSpace parentFolder) then
+                    Directory.CreateDirectory(parentFolder) |> ignore
 
-            do!
-                try
-                    logCollectMergeStage "WriteStart" $"outputCsvPath={outputCsvPath}"
-                    let parentFolder = Path.GetDirectoryName outputCsvPath
+                use writer = new StreamWriter(outputCsvPath, false)
 
-                    if not (String.IsNullOrWhiteSpace parentFolder) then
-                        Directory.CreateDirectory(parentFolder) |> ignore
+                let outputHeaderLines =
+                    buildMergedOutputHeaderLines
+                        firstSource.HeaderLines
+                        firstSource.DataColumnCount
+                        firstSource.DoseColumnIndex
 
-                    File.WriteAllText(outputCsvPath, outputLines)
-                    logCollectMergeStage "WriteEnd" $"outputCsvPath={outputCsvPath}"
-                    Ok()
-                with ex ->
-                    Error $"Failed writing merged csv '{outputCsvPath}': {ex.Message}"
-    }
+                for headerLine in outputHeaderLines do
+                    writer.WriteLine headerLine
+
+                logCollectMergeStage "MergeRowsStart" $"fileCount={sources.Length}"
+
+                let mutable rowIndex = 0
+                let mutable completed = false
+
+                while not completed do
+                    let rows = Array.zeroCreate<string array> sources.Length
+                    let mutable endedCount = 0
+                    let mutable endedPath = ""
+
+                    for sourceIndex in 0 .. sources.Length - 1 do
+                        match readNextDataRow sources[sourceIndex] with
+                        | Some row -> rows[sourceIndex] <- row
+                        | None ->
+                            endedCount <- endedCount + 1
+
+                            if String.IsNullOrEmpty endedPath then
+                                endedPath <- sources[sourceIndex].Path
+
+                    if endedCount = sources.Length then
+                        completed <- true
+                    elif endedCount > 0 then
+                        return!
+                            Error
+                                $"CSV row count mismatch at row index {rowIndex} in '{endedPath}'. At least one input file ended early."
+                    else
+                        let baseRow = rows[0]
+                        let mutable rowError: string option = None
+
+                        for sourceIndex in 0 .. sources.Length - 1 do
+                            let source = sources[sourceIndex]
+                            let row = rows[sourceIndex]
+
+                            if row.Length <> source.DataColumnCount then
+                                rowError <-
+                                    Some
+                                        $"CSV column count mismatch at row index {rowIndex} for '{source.Path}'. Expected {source.DataColumnCount}, got {row.Length}."
+
+                        match rowError with
+                        | Some errorMessage -> return! Error errorMessage
+                        | None ->
+                            let mutable sumDose = 0.0
+                            let mutable sumSquares = 0.0
+                            let mutable parseError: string option = None
+
+                            for sourceIndex in 0 .. sources.Length - 1 do
+                                let source = sources[sourceIndex]
+                                let row = rows[sourceIndex]
+
+                                if source.DoseColumnIndex >= row.Length then
+                                    parseError <-
+                                        Some
+                                            $"Dose column index {source.DoseColumnIndex} is out of bounds at row index {rowIndex} for '{source.Path}'."
+                                else
+                                    match parseDoseCell row[source.DoseColumnIndex] with
+                                    | Ok doseValue ->
+                                        sumDose <- sumDose + doseValue
+                                        sumSquares <- sumSquares + (doseValue * doseValue)
+                                    | Error parseMessage ->
+                                        parseError <-
+                                            Some
+                                                $"Failed parsing dose value at row index {rowIndex} for '{source.Path}': {parseMessage}"
+
+                            match parseError with
+                            | Some errorMessage -> return! Error errorMessage
+                            | None ->
+                                let nodeCount = sources.Length
+                                let meanDose = sumDose / float nodeCount
+                                let sdDose = sampleStandardDeviationFromMoments nodeCount sumDose sumSquares
+                                let semDose = if nodeCount < 2 then 0.0 else sdDose / sqrt (float nodeCount)
+
+                                let relSemPercent =
+                                    if meanDose = 0.0 then
+                                        0.0
+                                    else
+                                        100.0 * semDose / abs meanDose
+
+                                let mergedRow =
+                                    buildMergedOutputRow
+                                        baseRow
+                                        firstSource.DoseColumnIndex
+                                        sumDose
+                                        meanDose
+                                        sdDose
+                                        semDose
+                                        relSemPercent
+                                        nodeCount
+
+                                writer.WriteLine mergedRow
+                                rowIndex <- rowIndex + 1
+
+                                if rowIndex % 100000 = 0 then
+                                    logCollectMergeStage "MergeRowsProgress" $"rowIndex={rowIndex}"
+
+                writer.Flush()
+                logCollectMergeStage "MergeRowsEnd" $"rowCount={rowIndex}"
+                logCollectMergeStage "WriteEnd" $"outputCsvPath={outputCsvPath}"
+                return ()
+            }
+        finally
+            disposeReaders readers
