@@ -26,6 +26,35 @@ let private successfulTopasFooter =
             "             Total: User=4.67s Real=2.4752s Sys=0.79s"
         ]
 
+/// Formats one floating-point test value using invariant culture.
+let private formatTestFloat (value: float) : string =
+    value.ToString("G17", CultureInfo.InvariantCulture)
+
+/// Writes one raw TOPAS-style dose csv used by collect uncertainty tests.
+let private writeRawDoseCsv (path: string) (rows: (string * string * string * float) list) : unit =
+    let lines =
+        [
+            "# TOPAS Version..."
+            "# DoseToMedium ( Gy ) : Sum"
+        ]
+        @
+        (rows
+         |> List.map (fun (xValue, yValue, zValue, doseValue) ->
+             $"{xValue},{yValue},{zValue},{formatTestFloat doseValue}"))
+
+    File.WriteAllLines(path, lines)
+
+/// Writes one merged phase-space csv fixture with a dose_sum_Gy column.
+let private writeMergedPhaseSpaceCsv (path: string) (rows: (string * string * string * float) list) : unit =
+    let lines =
+        [ "x,y,z,dose_sum_Gy" ]
+        @
+        (rows
+         |> List.map (fun (xValue, yValue, zValue, doseValue) ->
+             $"{xValue},{yValue},{zValue},{formatTestFloat doseValue}"))
+
+    File.WriteAllLines(path, lines)
+
 [<Fact>]
 let ``Collect preflight blocks missing csv and missing log`` () =
     let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-{Guid.NewGuid():N}")
@@ -263,48 +292,124 @@ let ``Collect merge fails on mismatched shape`` () =
         cleanupTestDirectory folder
 
 [<Fact>]
-let ``Collect statistics computes mean median sd count`` () =
-    let folder = Path.Combine(Path.GetTempPath(), $"xunit-stats-{Guid.NewGuid():N}")
+let ``Collect final merge writes summed dose_merged csv`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"xunit-final-merge-{Guid.NewGuid():N}")
     Directory.CreateDirectory(folder) |> ignore
 
     try
-        let a = Path.Combine(folder, "phsp01.csv")
-        let b = Path.Combine(folder, "phsp02.csv")
-        let c = Path.Combine(folder, "phsp03.csv")
-        let summary = Path.Combine(folder, "dose_summary.csv")
-        File.WriteAllText(a, "x,y,z,dose_sum_Gy\n0,0,0,1\n0,1,0,2")
-        File.WriteAllText(b, "x,y,z,dose_sum_Gy\n0,0,0,3\n0,1,0,4")
-        File.WriteAllText(c, "x,y,z,dose_sum_Gy\n0,0,0,5\n0,1,0,6")
-        assertOk (computeDoseSummary [ a; b; c ] summary) |> ignore
+        let a = Path.Combine(folder, "phsp01_merged.csv")
+        let b = Path.Combine(folder, "phsp02_merged.csv")
+        let c = Path.Combine(folder, "phsp03_merged.csv")
+        let summary = Path.Combine(folder, "dose_merged.csv")
+        writeMergedPhaseSpaceCsv a [ ("0", "0", "0", 1.0); ("0", "1", "0", 2.0) ]
+        writeMergedPhaseSpaceCsv b [ ("0", "0", "0", 3.0); ("0", "1", "0", 4.0) ]
+        writeMergedPhaseSpaceCsv c [ ("0", "0", "0", 5.0); ("0", "1", "0", 6.0) ]
+        assertOk (mergePhaseSpaceDoseCsvFiles [ a; b; c ] summary) |> ignore
         let lines = File.ReadAllLines(summary)
-        Assert.Equal("x,y,z,total_dose_sum_Gy,phsp_mean_Gy,phsp_median_Gy,phsp_sd_Gy,phsp_sem_Gy,phsp_rel_sem_percent,phsp_count", lines[0])
+        Assert.Equal("x,y,z,dose_to_medium_Gy", lines[0])
 
         let row = lines[1].Split(',')
         Assert.Equal("0", row[0])
         Assert.Equal("0", row[1])
         Assert.Equal("0", row[2])
         Assert.Equal(9.0, Double.Parse(row[3], CultureInfo.InvariantCulture), 12)
-        Assert.Equal(3.0, Double.Parse(row[4], CultureInfo.InvariantCulture), 12)
-        Assert.Equal(3.0, Double.Parse(row[5], CultureInfo.InvariantCulture), 12)
-        Assert.Equal(2.0, Double.Parse(row[6], CultureInfo.InvariantCulture), 12)
-        Assert.Equal(1.1547005383792515, Double.Parse(row[7], CultureInfo.InvariantCulture), 12)
-        Assert.Equal(38.490017945975058, Double.Parse(row[8], CultureInfo.InvariantCulture), 12)
-        Assert.Equal("3", row[9])
     finally
         cleanupTestDirectory folder
 
 [<Fact>]
-let ``Collect statistics fails on mismatched row counts`` () =
-    let folder = Path.Combine(Path.GetTempPath(), $"xunit-stats-mismatch-{Guid.NewGuid():N}")
+let ``Collect uncertainty writes expected values for three raw batches`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"xunit-uncertainty-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(folder) |> ignore
+
+    try
+        let a = Path.Combine(folder, "node1.csv")
+        let b = Path.Combine(folder, "node2.csv")
+        let c = Path.Combine(folder, "node3.csv")
+        let output = Path.Combine(folder, "dose_with_uncertainty.csv")
+        writeRawDoseCsv a [ ("0", "0", "0", 1.0) ]
+        writeRawDoseCsv b [ ("0", "0", "0", 2.0) ]
+        writeRawDoseCsv c [ ("0", "0", "0", 3.0) ]
+        assertOk (computeDoseWithUncertaintyFromRawBatchCsvFiles [ a; b; c ] output) |> ignore
+        let lines = File.ReadAllLines(output)
+        Assert.Equal(
+            "x,y,z,dose_to_medium_Gy,batch_count,mean_batch_dose_Gy,batch_standard_deviation_Gy,standard_uncertainty_Gy,relative_uncertainty_percent",
+            lines[0]
+        )
+
+        let row = lines[1].Split(',')
+        Assert.Equal("0", row[0])
+        Assert.Equal("0", row[1])
+        Assert.Equal("0", row[2])
+        Assert.Equal(6.0, Double.Parse(row[3], CultureInfo.InvariantCulture), 12)
+        Assert.Equal("3", row[4])
+        Assert.Equal(2.0, Double.Parse(row[5], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(1.0, Double.Parse(row[6], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(1.7320508075688772, Double.Parse(row[7], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(28.86751345948129, Double.Parse(row[8], CultureInfo.InvariantCulture), 12)
+    finally
+        cleanupTestDirectory folder
+
+[<Fact>]
+let ``Collect uncertainty writes zero relative uncertainty for identical raw batches`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"xunit-uncertainty-identical-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(folder) |> ignore
+
+    try
+        let a = Path.Combine(folder, "node1.csv")
+        let b = Path.Combine(folder, "node2.csv")
+        let c = Path.Combine(folder, "node3.csv")
+        let output = Path.Combine(folder, "dose_with_uncertainty.csv")
+        writeRawDoseCsv a [ ("0", "0", "0", 2.0) ]
+        writeRawDoseCsv b [ ("0", "0", "0", 2.0) ]
+        writeRawDoseCsv c [ ("0", "0", "0", 2.0) ]
+        assertOk (computeDoseWithUncertaintyFromRawBatchCsvFiles [ a; b; c ] output) |> ignore
+        let outputLines = File.ReadAllLines(output)
+        let row = outputLines[1].Split(',')
+        Assert.Equal(6.0, Double.Parse(row[3], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(0.0, Double.Parse(row[6], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(0.0, Double.Parse(row[7], CultureInfo.InvariantCulture), 12)
+        Assert.Equal(0.0, Double.Parse(row[8], CultureInfo.InvariantCulture), 12)
+    finally
+        cleanupTestDirectory folder
+
+[<Fact>]
+let ``Collect final merge fails on mismatched row counts`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"xunit-final-merge-mismatch-{Guid.NewGuid():N}")
     Directory.CreateDirectory(folder) |> ignore
 
     try
         let a = Path.Combine(folder, "phsp01.csv")
         let b = Path.Combine(folder, "phsp02.csv")
-        let summary = Path.Combine(folder, "dose_summary.csv")
-        File.WriteAllText(a, "x,y,z,dose_sum_Gy\n0,0,0,1\n0,1,0,2")
-        File.WriteAllText(b, "x,y,z,dose_sum_Gy\n0,0,0,3")
-        Assert.True(Result.isError (computeDoseSummary [ a; b ] summary))
+        let summary = Path.Combine(folder, "dose_merged.csv")
+        writeMergedPhaseSpaceCsv a [ ("0", "0", "0", 1.0); ("0", "1", "0", 2.0) ]
+        writeMergedPhaseSpaceCsv b [ ("0", "0", "0", 3.0) ]
+        Assert.True(Result.isError (mergePhaseSpaceDoseCsvFiles [ a; b ] summary))
+    finally
+        cleanupTestDirectory folder
+
+[<Fact>]
+let ``Collect uncertainty fails on raw csv row or coordinate mismatch`` () =
+    let folder = Path.Combine(Path.GetTempPath(), $"xunit-uncertainty-mismatch-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(folder) |> ignore
+
+    try
+        let a = Path.Combine(folder, "node1.csv")
+        let b = Path.Combine(folder, "node2.csv")
+        let output = Path.Combine(folder, "dose_with_uncertainty.csv")
+        writeRawDoseCsv a [ ("0", "0", "0", 1.0); ("0", "1", "0", 2.0) ]
+        writeRawDoseCsv b [ ("0", "0", "0", 3.0) ]
+        Assert.True(Result.isError (computeDoseWithUncertaintyFromRawBatchCsvFiles [ a; b ] output))
+
+        writeRawDoseCsv b [ ("0", "0", "1", 3.0); ("0", "1", "0", 4.0) ]
+
+        let mismatch =
+            computeDoseWithUncertaintyFromRawBatchCsvFiles [ a; b ] output
+
+        Assert.True(Result.isError mismatch)
+
+        match mismatch with
+        | Error message -> Assert.Contains("Coordinate mismatch", message)
+        | Ok() -> Assert.True(false, "Expected coordinate mismatch error.")
     finally
         cleanupTestDirectory folder
 
@@ -354,13 +459,28 @@ let ``Collect operation writes outputs and updates status`` () =
             )
         Assert.Equal("Collected", result.Status)
         let outputFolder = Path.Combine(appRoot, "outputs", "1001")
+        let mergedOverNodesFolder = Path.Combine(outputFolder, "merged-over-nodes")
+        let mergedOverPhspFolder = Path.Combine(outputFolder, "merged-over-phsp")
+        let mergedDosePath = Path.Combine(mergedOverPhspFolder, "dose_merged.csv")
+        let uncertaintyPath = Path.Combine(outputFolder, "dose_with_uncertainty.csv")
         Assert.True(File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv")))
-        Assert.True(File.Exists(Path.Combine(outputFolder, "merged", "phsp01_merged.csv")))
-        Assert.True(File.Exists(Path.Combine(outputFolder, "dose_summary.csv")))
-        let mergedHeader = File.ReadLines(Path.Combine(outputFolder, "merged", "phsp01_merged.csv")) |> Seq.head
-        let summaryHeader = File.ReadLines(Path.Combine(outputFolder, "dose_summary.csv")) |> Seq.head
+        Assert.True(File.Exists(Path.Combine(mergedOverNodesFolder, "phsp01_merged.csv")))
+        Assert.True(File.Exists(mergedDosePath))
+        Assert.True(File.Exists(uncertaintyPath))
+        Assert.Equal(mergedDosePath, result.SummaryPath)
+        let mergedHeader = File.ReadLines(Path.Combine(mergedOverNodesFolder, "phsp01_merged.csv")) |> Seq.head
+        let summaryHeader = File.ReadLines(mergedDosePath) |> Seq.head
+        let uncertaintyLines = File.ReadAllLines(uncertaintyPath)
+        let mergedDoseLines = File.ReadAllLines(mergedDosePath)
+        let uncertaintyRow = uncertaintyLines[1].Split(',')
+        let mergedDoseRow = mergedDoseLines[1].Split(',')
         Assert.Equal("x,y,z,dose_sum_Gy,dose_mean_node_Gy,dose_sd_node_Gy,dose_sem_node_Gy,dose_rel_sem_node_percent,node_count", mergedHeader)
-        Assert.Equal("x,y,z,total_dose_sum_Gy,phsp_mean_Gy,phsp_median_Gy,phsp_sd_Gy,phsp_sem_Gy,phsp_rel_sem_percent,phsp_count", summaryHeader)
+        Assert.Equal("x,y,z,dose_to_medium_Gy", summaryHeader)
+        Assert.Equal(
+            Double.Parse(mergedDoseRow[3], CultureInfo.InvariantCulture),
+            Double.Parse(uncertaintyRow[3], CultureInfo.InvariantCulture),
+            12
+        )
 
         use statusCommand = conn.CreateCommand()
         statusCommand.CommandText <- "SELECT collect_status FROM generated_batches WHERE seed_base = '1001';"
@@ -426,8 +546,10 @@ let ``Collect operation applies phase-space exclusions to merge and manifest`` (
         Assert.Equal(1, result.MergedPhaseSpaceCount)
 
         let outputFolder = Path.Combine(appRoot, "outputs", "1001")
-        Assert.True(File.Exists(Path.Combine(outputFolder, "merged", "phsp01_merged.csv")))
-        Assert.False(File.Exists(Path.Combine(outputFolder, "merged", "phsp20_merged.csv")))
+        Assert.True(File.Exists(Path.Combine(outputFolder, "merged-over-nodes", "phsp01_merged.csv")))
+        Assert.False(File.Exists(Path.Combine(outputFolder, "merged-over-nodes", "phsp20_merged.csv")))
+        Assert.True(File.Exists(Path.Combine(outputFolder, "merged-over-phsp", "dose_merged.csv")))
+        Assert.True(File.Exists(Path.Combine(outputFolder, "dose_with_uncertainty.csv")))
 
         let manifestLines = File.ReadAllLines(Path.Combine(outputFolder, "collect_manifest.tsv"))
         Assert.Equal(3, manifestLines.Length)

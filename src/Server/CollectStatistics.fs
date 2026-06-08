@@ -6,11 +6,26 @@ open System.IO
 open System.Text
 open FsToolkit.ErrorHandling
 
-/// Represents one streaming summary source file with reader state.
-type private StreamingSummarySource = {
+/// Represents per-voxel uncertainty metrics derived from independent raw batches.
+type VoxelUncertaintyMetrics = {
+    DoseSum: float
+    BatchCount: int
+    MeanBatchDose: float
+    BatchStandardDeviation: float
+    StandardUncertainty: float
+    RelativeUncertaintyPercent: float option
+}
+
+/// Represents the header preamble and first numeric data row extracted from one csv stream.
+type private MergeCsvPreamble = {
+    HeaderLines: string list
+    FirstDataRow: string array
+}
+
+/// Represents one streaming dose source file with reader state.
+type private StreamingDoseSource = {
     Path: string
     Reader: StreamReader
-    HeaderLines: string list
     DoseColumnIndex: int
     DataColumnCount: int
     mutable PendingDataRow: string array option
@@ -23,12 +38,17 @@ let private splitCsvLine (line: string) : string array = line.Split(',')
 let private isIgnoredCsvLine (line: string) : bool =
     String.IsNullOrWhiteSpace line || line.TrimStart().StartsWith("#", StringComparison.Ordinal)
 
-/// Returns one UTC timestamp string used by collect summary logs.
-let private summaryLogTimestampUtc () : string = DateTime.UtcNow.ToString("O")
+/// Returns one UTC timestamp string used by collect statistics logs.
+let private statisticsLogTimestampUtc () : string = DateTime.UtcNow.ToString("O")
 
-/// Writes one collect summary stage log line to stdout.
-let private logCollectSummaryStage (stage: string) (message: string) : unit =
-    Console.WriteLine($"[{summaryLogTimestampUtc()}] [CollectStatistics] [{stage}] {message}")
+/// Writes one collect statistics stage log line to stdout.
+let private logCollectStatisticsStage (stage: string) (message: string) : unit =
+    Console.WriteLine($"[{statisticsLogTimestampUtc()}] [CollectStatistics] [{stage}] {message}")
+
+/// Returns true when the value can be parsed as a floating-point number.
+let private tryParseFloat (value: string) : bool =
+    let mutable parsed = 0.0
+    Double.TryParse(value.Trim(), NumberStyles.Float, CultureInfo.InvariantCulture, &parsed)
 
 /// Parses one floating-point value using invariant culture.
 let private parseFloat (value: string) : Result<float, string> =
@@ -39,9 +59,49 @@ let private parseFloat (value: string) : Result<float, string> =
     else
         Error $"Failed parsing numeric value '{value}'."
 
+/// Finds the last numeric column index in one row.
+let private lastNumericColumnIndex (columns: string array) : int option =
+    columns
+    |> Array.mapi (fun index value -> index, value)
+    |> Array.choose (fun (index, value) -> if tryParseFloat value then Some index else None)
+    |> Array.tryLast
+
+/// Returns normalized header token for case-insensitive matching.
+let private normalizeHeaderToken (value: string) : string =
+    value.Trim().ToLowerInvariant()
+
+/// Returns the first matching header column index from a list of preferred names.
+let private tryResolveHeaderColumnByNames (headerColumns: string array) (preferredNames: string list) : (int * string) option =
+    let normalizedColumns =
+        headerColumns
+        |> Array.mapi (fun index name -> index, name, normalizeHeaderToken name)
+
+    preferredNames
+    |> List.tryPick (fun preferred ->
+        normalizedColumns
+        |> Array.tryFind (fun (_, _, normalized) -> normalized = preferred)
+        |> Option.map (fun (index, originalName, _) -> index, originalName))
+
+/// Returns preferred raw-dose header names in strict priority order.
+let private preferredRawDoseHeaderNames: string list =
+    [
+        "dose_sum_gy"
+        "dose_gy"
+        "dose"
+        "dosetomedium"
+        "dose_to_medium"
+        "dose-to-medium"
+        "medium dose"
+    ]
+
 /// Returns zero when value is NaN or infinity.
 let private finiteOrZero (value: float) : float =
     if Double.IsNaN value || Double.IsInfinity value then 0.0 else value
+
+/// Formats one floating-point value with invariant culture.
+let private formatFloat (value: float) : string =
+    finiteOrZero value
+    |> fun safeValue -> safeValue.ToString("G17", CultureInfo.InvariantCulture)
 
 /// Tries to read one next non-blank csv row from a stream reader.
 let private tryReadNextNonBlankRow (reader: StreamReader) : string array option =
@@ -57,91 +117,145 @@ let private tryReadNextNonBlankRow (reader: StreamReader) : string array option 
 
     nextRow
 
-/// Reads one real csv header line and first data row from one merged csv stream.
+/// Reads header lines and the first numeric data row from one csv stream.
 let private readHeaderAndFirstDataRow
     (reader: StreamReader)
     (path: string)
-    : Result<string list * string array, string> =
-    let mutable headerLine: string option = None
+    : Result<MergeCsvPreamble, string> =
+    let headers = ResizeArray<string>()
     let mutable firstDataRow: string array option = None
+    let mutable continueReading = true
 
-    while headerLine.IsNone && not reader.EndOfStream do
+    while continueReading && not reader.EndOfStream do
         let line = reader.ReadLine()
 
         if not (isNull line) && not (isIgnoredCsvLine line) then
-            headerLine <- Some line
+            let columns = splitCsvLine line
 
-    while firstDataRow.IsNone && not reader.EndOfStream do
-        let line = reader.ReadLine()
+            match lastNumericColumnIndex columns with
+            | Some _ ->
+                firstDataRow <- Some columns
+                continueReading <- false
+            | None -> headers.Add line
 
-        if not (isNull line) && not (isIgnoredCsvLine line) then
-            firstDataRow <- Some(splitCsvLine line)
+    match firstDataRow with
+    | Some row ->
+        Ok
+            {
+                HeaderLines = headers |> Seq.toList
+                FirstDataRow = row
+            }
+    | None -> Error $"CSV did not contain any numeric data rows: {path}"
 
-    match headerLine, firstDataRow with
-    | Some header, Some row -> Ok([ header ], row)
-    | None, _ -> Error $"Merged csv header is missing in '{path}'."
-    | _, None -> Error $"Merged csv did not contain any data rows: {path}"
-
-/// Resolves dose_sum_Gy column index from a usable merged csv header.
-let private resolveDoseSumColumnIndexFromHeader
+/// Resolves the raw dose column using header priority or first-row numeric fallback.
+let private resolveDoseColumnFromHeaderOrFallback
     (path: string)
     (headerLines: string list)
     (firstDataRow: string array)
     : Result<int, string> =
-    match headerLines |> List.tryLast with
-    | None -> Error $"Merged csv header is missing in '{path}', expected column 'dose_sum_Gy'."
-    | Some headerLine ->
-        let headerColumns = splitCsvLine headerLine
+    let expectedColumnCount = firstDataRow.Length
 
-        if headerColumns.Length <> firstDataRow.Length then
-            Error $"Merged csv header shape mismatch in '{path}', expected column 'dose_sum_Gy'."
+    let usableHeaderColumns =
+        match headerLines |> List.tryLast with
+        | Some lastHeaderLine ->
+            let columns = splitCsvLine lastHeaderLine
+            if columns.Length = expectedColumnCount then Some columns else None
+        | None -> None
+
+    match usableHeaderColumns with
+    | Some headerColumns ->
+        match tryResolveHeaderColumnByNames headerColumns preferredRawDoseHeaderNames with
+        | Some(doseColumnIndex, _) -> Ok doseColumnIndex
+        | None ->
+            let headerText = headerColumns |> Array.map _.Trim() |> String.concat ", "
+            Error $"Unable to locate dose column from header in '{path}'. Header columns: {headerText}"
+    | None ->
+        match lastNumericColumnIndex firstDataRow with
+        | Some doseColumnIndex -> Ok doseColumnIndex
+        | None -> Error $"CSV dose column could not be determined for '{path}'."
+
+/// Resolves one required named column from a usable header line.
+let private resolveRequiredColumnFromHeader
+    (path: string)
+    (headerLines: string list)
+    (firstDataRow: string array)
+    (preferredNames: string list)
+    (columnLabel: string)
+    : Result<int, string> =
+    let expectedColumnCount = firstDataRow.Length
+
+    match headerLines |> List.tryLast with
+    | None -> Error $"CSV header is missing in '{path}', expected column '{columnLabel}'."
+    | Some lastHeaderLine ->
+        let headerColumns = splitCsvLine lastHeaderLine
+
+        if headerColumns.Length <> expectedColumnCount then
+            Error $"CSV header shape mismatch in '{path}', expected column '{columnLabel}'."
         else
-            match
-                headerColumns
-                |> Array.mapi (fun index name -> index, name.Trim())
-                |> Array.tryFind (fun (_, name) -> String.Equals(name, "dose_sum_Gy", StringComparison.OrdinalIgnoreCase))
-            with
-            | Some(index, _) -> Ok index
+            match tryResolveHeaderColumnByNames headerColumns preferredNames with
+            | Some(columnIndex, _) -> Ok columnIndex
             | None ->
                 let headerText = headerColumns |> Array.map _.Trim() |> String.concat ", "
-                Error $"Merged csv is missing required column 'dose_sum_Gy' in '{path}'. Header columns: {headerText}"
+                Error $"CSV is missing required column '{columnLabel}' in '{path}'. Header columns: {headerText}"
 
-/// Formats one floating-point value with invariant culture.
-let private formatFloat (value: float) : string =
-    finiteOrZero value
-    |> fun safeValue -> safeValue.ToString("G17", CultureInfo.InvariantCulture)
-
-/// Opens one csv reader for streaming summary.
+/// Opens one csv reader for streaming statistics work.
 let private openCsvReader (path: string) : Result<StreamReader, string> =
     try
         Ok(new StreamReader(path))
     with ex ->
-        Error $"Failed opening merged csv '{path}': {ex.Message}"
+        Error $"Failed opening csv '{path}': {ex.Message}"
 
-/// Creates one streaming summary source descriptor from an opened csv stream.
-let private createStreamingSummarySource (path: string) (reader: StreamReader) : Result<StreamingSummarySource, string> =
+/// Creates one streaming dose source descriptor for a raw batch csv.
+let private createStreamingDoseSourceForRawBatch (path: string) (reader: StreamReader) : Result<StreamingDoseSource, string> =
     result {
-        let! headerLines, firstDataRow = readHeaderAndFirstDataRow reader path
-        let! doseColumnIndex = resolveDoseSumColumnIndexFromHeader path headerLines firstDataRow
+        let! preamble = readHeaderAndFirstDataRow reader path
+        let! doseColumnIndex = resolveDoseColumnFromHeaderOrFallback path preamble.HeaderLines preamble.FirstDataRow
 
-        if doseColumnIndex >= firstDataRow.Length then
+        if doseColumnIndex >= preamble.FirstDataRow.Length then
             return! Error $"Dose column index {doseColumnIndex} is out of bounds for '{path}'."
 
-        let! _ = parseFloat firstDataRow[doseColumnIndex]
+        let! _ = parseFloat preamble.FirstDataRow[doseColumnIndex]
 
         return
             {
                 Path = path
                 Reader = reader
-                HeaderLines = headerLines
                 DoseColumnIndex = doseColumnIndex
-                DataColumnCount = firstDataRow.Length
-                PendingDataRow = Some firstDataRow
+                DataColumnCount = preamble.FirstDataRow.Length
+                PendingDataRow = Some preamble.FirstDataRow
             }
     }
 
-/// Returns the next data row from a streaming summary source.
-let private readNextDataRow (source: StreamingSummarySource) : string array option =
+/// Creates one streaming dose source descriptor for a csv with a required named dose column.
+let private createStreamingDoseSourceForNamedColumn
+    (path: string)
+    (reader: StreamReader)
+    (preferredNames: string list)
+    (columnLabel: string)
+    : Result<StreamingDoseSource, string> =
+    result {
+        let! preamble = readHeaderAndFirstDataRow reader path
+
+        let! doseColumnIndex =
+            resolveRequiredColumnFromHeader path preamble.HeaderLines preamble.FirstDataRow preferredNames columnLabel
+
+        if doseColumnIndex >= preamble.FirstDataRow.Length then
+            return! Error $"Dose column index {doseColumnIndex} is out of bounds for '{path}'."
+
+        let! _ = parseFloat preamble.FirstDataRow[doseColumnIndex]
+
+        return
+            {
+                Path = path
+                Reader = reader
+                DoseColumnIndex = doseColumnIndex
+                DataColumnCount = preamble.FirstDataRow.Length
+                PendingDataRow = Some preamble.FirstDataRow
+            }
+    }
+
+/// Returns the next data row from a streaming dose source.
+let private readNextDataRow (source: StreamingDoseSource) : string array option =
     match source.PendingDataRow with
     | Some pending ->
         source.PendingDataRow <- None
@@ -157,22 +271,34 @@ let private sampleStandardDeviationFromMoments (count: int) (sum: float) (sumSqu
         let variance = Math.Max(0.0, numerator / float (count - 1))
         sqrt variance
 
-/// Computes the median value from an unsorted numeric array.
-let private medianFromValues (values: float array) : float =
-    let sorted = Array.copy values
-    Array.Sort sorted
-    let count = sorted.Length
-
-    if count % 2 = 1 then
-        sorted[count / 2]
+/// Computes voxel uncertainty from independent raw dose batches.
+let computeVoxelUncertaintyMetrics
+    (doseSum: float)
+    (sumSquares: float)
+    (batchCount: int)
+    : Result<VoxelUncertaintyMetrics, string> =
+    if batchCount < 2 then
+        Error "At least two batch values are required to compute sample uncertainty."
     else
-        let upper = sorted[count / 2]
-        let lower = sorted[(count / 2) - 1]
-        (lower + upper) / 2.0
+        let meanBatchDose = doseSum / float batchCount
+        let batchStandardDeviation = sampleStandardDeviationFromMoments batchCount doseSum sumSquares
+        let standardUncertainty = sqrt (float batchCount) * batchStandardDeviation
 
-/// Builds canonical summary output header line.
-let private buildSummaryHeaders () : string list =
-    [ "x,y,z,total_dose_sum_Gy,phsp_mean_Gy,phsp_median_Gy,phsp_sd_Gy,phsp_sem_Gy,phsp_rel_sem_percent,phsp_count" ]
+        let relativeUncertaintyPercent =
+            if doseSum <= 0.0 then
+                None
+            else
+                Some(100.0 * standardUncertainty / doseSum)
+
+        Ok
+            {
+                DoseSum = doseSum
+                BatchCount = batchCount
+                MeanBatchDose = meanBatchDose
+                BatchStandardDeviation = batchStandardDeviation
+                StandardUncertainty = standardUncertainty
+                RelativeUncertaintyPercent = relativeUncertaintyPercent
+            }
 
 /// Extracts x,y,z coordinate values from the first three non-dose columns.
 let private extractCoordinateColumns (baseRow: string array) (doseColumnIndex: int) : Result<string * string * string, string> =
@@ -186,32 +312,68 @@ let private extractCoordinateColumns (baseRow: string array) (doseColumnIndex: i
     else
         Ok(coordinates[0], coordinates[1], coordinates[2])
 
-/// Builds one summary output row using x,y,z and appending summary statistics.
-let private buildSummaryOutputRow
+/// Validates that one row carries the expected x,y,z coordinates.
+let private ensureMatchingCoordinates
+    (expectedCoordinates: string * string * string)
+    (source: StreamingDoseSource)
+    (row: string array)
+    (rowIndex: int)
+    : Result<unit, string> =
+    result {
+        let! actualCoordinates =
+            extractCoordinateColumns row source.DoseColumnIndex
+            |> Result.mapError (fun message -> $"Coordinate parse failed at row index {rowIndex} for '{source.Path}': {message}")
+
+        if actualCoordinates <> expectedCoordinates then
+            let expectedX, expectedY, expectedZ = expectedCoordinates
+            let actualX, actualY, actualZ = actualCoordinates
+
+            return!
+                Error
+                    $"Coordinate mismatch at row index {rowIndex} for '{source.Path}'. Expected ({expectedX}, {expectedY}, {expectedZ}), got ({actualX}, {actualY}, {actualZ})."
+    }
+
+/// Builds canonical final merged dose header line.
+let private buildDoseMergedHeaders () : string list = [ "x,y,z,dose_to_medium_Gy" ]
+
+/// Builds one final merged dose output row.
+let private buildDoseMergedRow (xValue: string) (yValue: string) (zValue: string) (doseSum: float) : string =
+    let builder = StringBuilder()
+    builder.Append(xValue) |> ignore
+    builder.Append(',').Append(yValue) |> ignore
+    builder.Append(',').Append(zValue) |> ignore
+    builder.Append(',').Append(formatFloat doseSum) |> ignore
+    builder.ToString()
+
+/// Builds canonical dose-with-uncertainty header line.
+let private buildDoseWithUncertaintyHeaders () : string list =
+    [
+        "x,y,z,dose_to_medium_Gy,batch_count,mean_batch_dose_Gy,batch_standard_deviation_Gy,standard_uncertainty_Gy,relative_uncertainty_percent"
+    ]
+
+/// Builds one dose-with-uncertainty output row.
+let private buildDoseWithUncertaintyRow
     (xValue: string)
     (yValue: string)
     (zValue: string)
-    (totalDose: float)
-    (meanDose: float)
-    (medianDose: float)
-    (sdDose: float)
-    (semDose: float)
-    (relSemPercent: float)
-    (count: int)
+    (metrics: VoxelUncertaintyMetrics)
     : string =
     let builder = StringBuilder()
 
     builder.Append(xValue) |> ignore
     builder.Append(',').Append(yValue) |> ignore
     builder.Append(',').Append(zValue) |> ignore
+    builder.Append(',').Append(formatFloat metrics.DoseSum) |> ignore
+    builder.Append(',').Append(metrics.BatchCount) |> ignore
+    builder.Append(',').Append(formatFloat metrics.MeanBatchDose) |> ignore
+    builder.Append(',').Append(formatFloat metrics.BatchStandardDeviation) |> ignore
+    builder.Append(',').Append(formatFloat metrics.StandardUncertainty) |> ignore
+    builder.Append(',') |> ignore
 
-    builder.Append(',').Append(formatFloat totalDose) |> ignore
-    builder.Append(',').Append(formatFloat meanDose) |> ignore
-    builder.Append(',').Append(formatFloat medianDose) |> ignore
-    builder.Append(',').Append(formatFloat sdDose) |> ignore
-    builder.Append(',').Append(formatFloat semDose) |> ignore
-    builder.Append(',').Append(formatFloat relSemPercent) |> ignore
-    builder.Append(',').Append(count) |> ignore
+    match metrics.RelativeUncertaintyPercent with
+    | Some value -> builder.Append(formatFloat value) |> ignore
+    | None -> ()
+
     builder.ToString()
 
 /// Disposes all stream readers in a best-effort way.
@@ -222,13 +384,31 @@ let private disposeReaders (readers: ResizeArray<StreamReader>) : unit =
         with _ ->
             ()
 
-/// Computes summary statistics across phase-space merged csv files and writes dose_summary.csv.
-let computeDoseSummary (mergedCsvPaths: string list) (outputSummaryPath: string) : Result<unit, string> =
+/// Validates that every source advertises the same data column count.
+let private validateUniformColumnCount (sources: StreamingDoseSource array) : Result<unit, string> =
+    let firstSource = sources[0]
+    let expectedColumnCount = firstSource.DataColumnCount
+
+    match sources |> Array.tryFind (fun source -> source.DataColumnCount <> expectedColumnCount) with
+    | Some source ->
+        Error
+            $"CSV column count mismatch between files. Expected {expectedColumnCount}, got {source.DataColumnCount} for '{source.Path}'."
+    | None -> Ok()
+
+/// Ensures the parent folder exists for one output file path.
+let private ensureParentFolderExists (path: string) : unit =
+    let parentFolder = Path.GetDirectoryName path
+
+    if not (String.IsNullOrWhiteSpace parentFolder) then
+        Directory.CreateDirectory(parentFolder) |> ignore
+
+/// Merges node-merged phase-space csv files into one final dose_merged.csv.
+let mergePhaseSpaceDoseCsvFiles (mergedCsvPaths: string list) (outputSummaryPath: string) : Result<unit, string> =
     if mergedCsvPaths.IsEmpty then
         Error "No merged phase-space csv files were provided."
     else
-        logCollectSummaryStage
-            "SummaryStart"
+        logCollectStatisticsStage
+            "FinalMergeStart"
             $"mergedFileCount={mergedCsvPaths.Length}; outputSummaryPath={outputSummaryPath}"
 
         let readers = ResizeArray<StreamReader>()
@@ -241,9 +421,11 @@ let computeDoseSummary (mergedCsvPaths: string list) (outputSummaryPath: string)
                         let! reader = openCsvReader path
                         readers.Add reader
 
-                        let! source = createStreamingSummarySource path reader
-                        logCollectSummaryStage
-                            "DoseColumnResolved"
+                        let! source =
+                            createStreamingDoseSourceForNamedColumn path reader [ "dose_sum_gy" ] "dose_sum_Gy"
+
+                        logCollectStatisticsStage
+                            "FinalMergeDoseColumnResolved"
                             $"path={path}; doseColumnIndex={source.DoseColumnIndex}; dataColumnCount={source.DataColumnCount}"
 
                         return source
@@ -251,32 +433,15 @@ let computeDoseSummary (mergedCsvPaths: string list) (outputSummaryPath: string)
                     |> List.sequenceResultM
                     |> Result.map List.toArray
 
-                let firstSource = sources[0]
-                let expectedColumnCount = firstSource.DataColumnCount
-
-                match
-                    sources
-                    |> Array.tryFind (fun source -> source.DataColumnCount <> expectedColumnCount)
-                with
-                | Some source ->
-                    return!
-                        Error
-                            $"CSV column count mismatch between merged files. Expected {expectedColumnCount}, got {source.DataColumnCount} for '{source.Path}'."
-                | None -> ()
-
-                let parentFolder = Path.GetDirectoryName outputSummaryPath
-
-                if not (String.IsNullOrWhiteSpace parentFolder) then
-                    Directory.CreateDirectory(parentFolder) |> ignore
+                do! validateUniformColumnCount sources
+                ensureParentFolderExists outputSummaryPath
 
                 use writer = new StreamWriter(outputSummaryPath, false)
 
-                let summaryHeaders =
-                    buildSummaryHeaders ()
-
-                for headerLine in summaryHeaders do
+                for headerLine in buildDoseMergedHeaders () do
                     writer.WriteLine headerLine
 
+                let firstSource = sources[0]
                 let mutable rowIndex = 0
                 let mutable completed = false
 
@@ -302,77 +467,274 @@ let computeDoseSummary (mergedCsvPaths: string list) (outputSummaryPath: string)
                                 $"CSV row count mismatch at row index {rowIndex} in '{endedPath}'. At least one merged file ended early."
                     else
                         let baseRow = rows[0]
-                        let values = Array.zeroCreate<float> sources.Length
                         let mutable rowError: string option = None
                         let mutable sumDose = 0.0
-                        let mutable sumSquares = 0.0
 
-                        for sourceIndex in 0 .. sources.Length - 1 do
-                            let source = sources[sourceIndex]
-                            let row = rows[sourceIndex]
+                        let baseCoordinatesResult =
+                            extractCoordinateColumns baseRow firstSource.DoseColumnIndex
+                            |> Result.mapError (fun message -> $"Coordinate parse failed at row index {rowIndex}: {message}")
 
-                            if row.Length <> source.DataColumnCount then
-                                rowError <-
-                                    Some
-                                        $"CSV column count mismatch at row index {rowIndex} for '{source.Path}'. Expected {source.DataColumnCount}, got {row.Length}."
-                            elif source.DoseColumnIndex >= row.Length then
-                                rowError <-
-                                    Some
-                                        $"Dose column index {source.DoseColumnIndex} is out of bounds at row index {rowIndex} for '{source.Path}'."
-                            else
-                                match parseFloat row[source.DoseColumnIndex] with
-                                | Ok doseValue ->
-                                    values[sourceIndex] <- doseValue
-                                    sumDose <- sumDose + doseValue
-                                    sumSquares <- sumSquares + (doseValue * doseValue)
-                                | Error parseMessage ->
+                        match baseCoordinatesResult with
+                        | Error message -> return! Error message
+                        | Ok(xValue, yValue, zValue) ->
+                            for sourceIndex in 0 .. sources.Length - 1 do
+                                let source = sources[sourceIndex]
+                                let row = rows[sourceIndex]
+
+                                if row.Length <> source.DataColumnCount then
                                     rowError <-
                                         Some
-                                            $"Failed parsing dose_sum_Gy at row index {rowIndex} for '{source.Path}': {parseMessage}"
+                                            $"CSV column count mismatch at row index {rowIndex} for '{source.Path}'. Expected {source.DataColumnCount}, got {row.Length}."
+                                elif source.DoseColumnIndex >= row.Length then
+                                    rowError <-
+                                        Some
+                                            $"Dose column index {source.DoseColumnIndex} is out of bounds at row index {rowIndex} for '{source.Path}'."
+                                elif rowError.IsNone then
+                                    match ensureMatchingCoordinates (xValue, yValue, zValue) source row rowIndex with
+                                    | Ok() ->
+                                        match parseFloat row[source.DoseColumnIndex] with
+                                        | Ok doseValue -> sumDose <- sumDose + doseValue
+                                        | Error parseMessage ->
+                                            rowError <-
+                                                Some
+                                                    $"Failed parsing dose_sum_Gy at row index {rowIndex} for '{source.Path}': {parseMessage}"
+                                    | Error message -> rowError <- Some message
 
-                        match rowError with
-                        | Some errorMessage -> return! Error errorMessage
-                        | None ->
-                            let! xValue, yValue, zValue =
-                                match extractCoordinateColumns baseRow firstSource.DoseColumnIndex with
-                                | Ok coordinates -> Ok coordinates
-                                | Error message ->
-                                    Error $"Coordinate parse failed at row index {rowIndex}: {message}"
+                            match rowError with
+                            | Some errorMessage -> return! Error errorMessage
+                            | None ->
+                                writer.WriteLine(buildDoseMergedRow xValue yValue zValue sumDose)
+                                rowIndex <- rowIndex + 1
 
-                            let phspCount = sources.Length
-                            let meanDose = sumDose / float phspCount
-                            let medianDose = medianFromValues values
-                            let sdDose = sampleStandardDeviationFromMoments phspCount sumDose sumSquares
-                            let semDose = if phspCount < 2 then 0.0 else sdDose / sqrt (float phspCount)
-
-                            let relSemPercent =
-                                if meanDose = 0.0 then
-                                    0.0
-                                else
-                                    100.0 * semDose / abs meanDose
-
-                            let summaryRow =
-                                buildSummaryOutputRow
-                                    xValue
-                                    yValue
-                                    zValue
-                                    sumDose
-                                    meanDose
-                                    medianDose
-                                    sdDose
-                                    semDose
-                                    relSemPercent
-                                    phspCount
-
-                            writer.WriteLine summaryRow
-                            rowIndex <- rowIndex + 1
-
-                            if rowIndex % 100000 = 0 then
-                                logCollectSummaryStage "SummaryProgress" $"rowIndex={rowIndex}"
+                                if rowIndex % 100000 = 0 then
+                                    logCollectStatisticsStage "FinalMergeProgress" $"rowIndex={rowIndex}"
 
                 writer.Flush()
-                logCollectSummaryStage "SummaryEnd" $"rowCount={rowIndex}; outputSummaryPath={outputSummaryPath}"
+                logCollectStatisticsStage "FinalMergeEnd" $"rowCount={rowIndex}; outputSummaryPath={outputSummaryPath}"
                 return ()
             }
         finally
             disposeReaders readers
+
+/// Computes dose_with_uncertainty.csv directly from independent raw batch csv files.
+let computeDoseWithUncertaintyFromRawBatchCsvFiles
+    (inputCsvPaths: string list)
+    (outputUncertaintyPath: string)
+    : Result<unit, string> =
+    if inputCsvPaths.IsEmpty then
+        Error "No raw batch csv files were provided for uncertainty calculation."
+    elif inputCsvPaths.Length < 2 then
+        Error "At least two raw batch csv files are required to compute uncertainty."
+    else
+        logCollectStatisticsStage
+            "UncertaintyStart"
+            $"rawBatchFileCount={inputCsvPaths.Length}; outputUncertaintyPath={outputUncertaintyPath}"
+
+        let readers = ResizeArray<StreamReader>()
+
+        try
+            result {
+                let! sources =
+                    inputCsvPaths
+                    |> List.map (fun path -> result {
+                        let! reader = openCsvReader path
+                        readers.Add reader
+
+                        let! source = createStreamingDoseSourceForRawBatch path reader
+                        logCollectStatisticsStage
+                            "UncertaintyDoseColumnResolved"
+                            $"path={path}; doseColumnIndex={source.DoseColumnIndex}; dataColumnCount={source.DataColumnCount}"
+
+                        return source
+                    })
+                    |> List.sequenceResultM
+                    |> Result.map List.toArray
+
+                do! validateUniformColumnCount sources
+                ensureParentFolderExists outputUncertaintyPath
+
+                use writer = new StreamWriter(outputUncertaintyPath, false)
+
+                for headerLine in buildDoseWithUncertaintyHeaders () do
+                    writer.WriteLine headerLine
+
+                let firstSource = sources[0]
+                let mutable rowIndex = 0
+                let mutable completed = false
+
+                while not completed do
+                    let rows = Array.zeroCreate<string array> sources.Length
+                    let mutable endedCount = 0
+                    let mutable endedPath = ""
+
+                    for sourceIndex in 0 .. sources.Length - 1 do
+                        match readNextDataRow sources[sourceIndex] with
+                        | Some row -> rows[sourceIndex] <- row
+                        | None ->
+                            endedCount <- endedCount + 1
+
+                            if String.IsNullOrEmpty endedPath then
+                                endedPath <- sources[sourceIndex].Path
+
+                    if endedCount = sources.Length then
+                        completed <- true
+                    elif endedCount > 0 then
+                        return!
+                            Error
+                                $"CSV row count mismatch at row index {rowIndex} in '{endedPath}'. At least one raw batch file ended early."
+                    else
+                        let baseRow = rows[0]
+                        let mutable rowError: string option = None
+                        let mutable doseSum = 0.0
+                        let mutable doseSumSquares = 0.0
+                        let mutable batchCount = 0
+
+                        let baseCoordinatesResult =
+                            extractCoordinateColumns baseRow firstSource.DoseColumnIndex
+                            |> Result.mapError (fun message -> $"Coordinate parse failed at row index {rowIndex}: {message}")
+
+                        match baseCoordinatesResult with
+                        | Error message -> return! Error message
+                        | Ok(xValue, yValue, zValue) ->
+                            for sourceIndex in 0 .. sources.Length - 1 do
+                                let source = sources[sourceIndex]
+                                let row = rows[sourceIndex]
+
+                                if row.Length <> source.DataColumnCount then
+                                    rowError <-
+                                        Some
+                                            $"CSV column count mismatch at row index {rowIndex} for '{source.Path}'. Expected {source.DataColumnCount}, got {row.Length}."
+                                elif source.DoseColumnIndex >= row.Length then
+                                    rowError <-
+                                        Some
+                                            $"Dose column index {source.DoseColumnIndex} is out of bounds at row index {rowIndex} for '{source.Path}'."
+                                elif rowError.IsNone then
+                                    match ensureMatchingCoordinates (xValue, yValue, zValue) source row rowIndex with
+                                    | Ok() ->
+                                        match parseFloat row[source.DoseColumnIndex] with
+                                        | Ok doseValue ->
+                                            doseSum <- doseSum + doseValue
+                                            doseSumSquares <- doseSumSquares + (doseValue * doseValue)
+                                            batchCount <- batchCount + 1
+                                        | Error parseMessage ->
+                                            rowError <-
+                                                Some
+                                                    $"Failed parsing raw batch dose at row index {rowIndex} for '{source.Path}': {parseMessage}"
+                                    | Error message -> rowError <- Some message
+
+                            match rowError with
+                            | Some errorMessage -> return! Error errorMessage
+                            | None ->
+                                let! metrics = computeVoxelUncertaintyMetrics doseSum doseSumSquares batchCount
+                                writer.WriteLine(buildDoseWithUncertaintyRow xValue yValue zValue metrics)
+                                rowIndex <- rowIndex + 1
+
+                                if rowIndex % 100000 = 0 then
+                                    logCollectStatisticsStage "UncertaintyProgress" $"rowIndex={rowIndex}"
+
+                writer.Flush()
+                logCollectStatisticsStage "UncertaintyEnd" $"rowCount={rowIndex}; outputUncertaintyPath={outputUncertaintyPath}"
+                return ()
+            }
+        finally
+            disposeReaders readers
+
+/// Returns the floating-point tolerance used for dose cross-checks.
+let private doseValidationTolerance (left: float) (right: float) : float =
+    let scale = max 1.0 (max (abs left) (abs right))
+    max 1e-12 (1e-9 * scale)
+
+/// Validates that dose_merged.csv matches dose_with_uncertainty.csv voxel-by-voxel.
+let validateDoseMergedMatchesUncertainty
+    (doseMergedPath: string)
+    (doseWithUncertaintyPath: string)
+    : Result<unit, string> =
+    logCollectStatisticsStage
+        "ValidationStart"
+        $"doseMergedPath={doseMergedPath}; doseWithUncertaintyPath={doseWithUncertaintyPath}"
+
+    let readers = ResizeArray<StreamReader>()
+
+    try
+        result {
+            let! leftReader = openCsvReader doseMergedPath
+            readers.Add leftReader
+
+            let! rightReader = openCsvReader doseWithUncertaintyPath
+            readers.Add rightReader
+
+            let! doseMergedSource =
+                createStreamingDoseSourceForNamedColumn
+                    doseMergedPath
+                    leftReader
+                    [ "dose_to_medium_gy" ]
+                    "dose_to_medium_Gy"
+
+            let! doseWithUncertaintySource =
+                createStreamingDoseSourceForNamedColumn
+                    doseWithUncertaintyPath
+                    rightReader
+                    [ "dose_to_medium_gy" ]
+                    "dose_to_medium_Gy"
+
+            let mutable rowIndex = 0
+            let mutable completed = false
+
+            while not completed do
+                let leftRow = readNextDataRow doseMergedSource
+                let rightRow = readNextDataRow doseWithUncertaintySource
+
+                match leftRow, rightRow with
+                | None, None -> completed <- true
+                | None, Some _ ->
+                    return!
+                        Error
+                            $"CSV row count mismatch at row index {rowIndex} in '{doseWithUncertaintyPath}'. dose_merged.csv ended early."
+                | Some _, None ->
+                    return!
+                        Error
+                            $"CSV row count mismatch at row index {rowIndex} in '{doseMergedPath}'. dose_with_uncertainty.csv ended early."
+                | Some leftValues, Some rightValues ->
+                    if leftValues.Length <> doseMergedSource.DataColumnCount then
+                        return!
+                            Error
+                                $"CSV column count mismatch at row index {rowIndex} for '{doseMergedPath}'. Expected {doseMergedSource.DataColumnCount}, got {leftValues.Length}."
+
+                    if rightValues.Length <> doseWithUncertaintySource.DataColumnCount then
+                        return!
+                            Error
+                                $"CSV column count mismatch at row index {rowIndex} for '{doseWithUncertaintyPath}'. Expected {doseWithUncertaintySource.DataColumnCount}, got {rightValues.Length}."
+
+                    let! leftCoordinates =
+                        extractCoordinateColumns leftValues doseMergedSource.DoseColumnIndex
+                        |> Result.mapError (fun message -> $"Coordinate parse failed at row index {rowIndex} for '{doseMergedPath}': {message}")
+
+                    do! ensureMatchingCoordinates leftCoordinates doseWithUncertaintySource rightValues rowIndex
+
+                    let! leftDose =
+                        parseFloat leftValues[doseMergedSource.DoseColumnIndex]
+                        |> Result.mapError (fun message -> $"Failed parsing merged dose at row index {rowIndex} for '{doseMergedPath}': {message}")
+
+                    let! rightDose =
+                        parseFloat rightValues[doseWithUncertaintySource.DoseColumnIndex]
+                        |> Result.mapError (fun message ->
+                            $"Failed parsing dose_to_medium_Gy at row index {rowIndex} for '{doseWithUncertaintyPath}': {message}")
+
+                    let difference = abs (leftDose - rightDose)
+                    let tolerance = doseValidationTolerance leftDose rightDose
+
+                    if difference > tolerance then
+                        return!
+                            Error
+                                $"Dose mismatch at row index {rowIndex}. dose_merged.csv={formatFloat leftDose}, dose_with_uncertainty.csv={formatFloat rightDose}, tolerance={formatFloat tolerance}."
+
+                    rowIndex <- rowIndex + 1
+
+                    if rowIndex % 100000 = 0 then
+                        logCollectStatisticsStage "ValidationProgress" $"rowIndex={rowIndex}"
+
+            logCollectStatisticsStage "ValidationEnd" $"rowCount={rowIndex}"
+            return ()
+        }
+    finally
+        disposeReaders readers

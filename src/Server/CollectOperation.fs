@@ -251,11 +251,14 @@ let private buildCollectManifestLines (rows: CollectRunRow list) : string list =
 let private validateCollectOutputCollisions
     (plannedMergedFilesList: string list)
     (summaryPath: string)
+    (uncertaintyPath: string)
     : Result<unit, string> =
     if plannedMergedFilesList |> List.exists File.Exists then
         Error "One or more planned merged csv files already exist."
     elif File.Exists summaryPath then
-        Error $"Summary output file already exists: {summaryPath}"
+        Error $"Final merged dose output file already exists: {summaryPath}"
+    elif File.Exists uncertaintyPath then
+        Error $"Dose uncertainty output file already exists: {uncertaintyPath}"
     else
         Ok()
 
@@ -380,10 +383,16 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
 
             let outputFolder = outputFolderPath settings request.SeedBase
             let summaryPath = plannedSummaryPath settings request.SeedBase
+            let uncertaintyPath = plannedUncertaintyPath settings request.SeedBase
             let manifestPath = plannedManifestPath settings request.SeedBase
             let plannedMergedFilesList = plannedMergedFiles settings request.SeedBase effectiveRows
+            let rawBatchCsvPaths =
+                effectiveRows
+                |> List.map expectedCsvAndLogPaths
+                |> List.map fst
+                |> List.distinct
 
-            do! validateCollectOutputCollisions plannedMergedFilesList summaryPath
+            do! validateCollectOutputCollisions plannedMergedFilesList summaryPath uncertaintyPath
             logCollectStage request.SeedBase "CollisionValidation" "Output collision validation passed."
 
             logCollectStage request.SeedBase "MergeStart" "Starting phase-space CSV merge."
@@ -396,9 +405,17 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
                 "MergeEnd"
                 $"Merged phase-space files count={mergedFiles.Length}."
 
-            logCollectStage request.SeedBase "SummaryStart" $"Computing dose summary: {summaryPath}"
-            do! computeDoseSummary mergedPaths summaryPath
-            logCollectStage request.SeedBase "SummaryEnd" $"Dose summary written: {summaryPath}"
+            logCollectStage request.SeedBase "FinalMergeStart" $"Computing final merged dose: {summaryPath}"
+            do! mergePhaseSpaceDoseCsvFiles mergedPaths summaryPath
+            logCollectStage request.SeedBase "FinalMergeEnd" $"Final merged dose written: {summaryPath}"
+
+            logCollectStage request.SeedBase "UncertaintyStart" $"Computing dose uncertainty: {uncertaintyPath}"
+            do! computeDoseWithUncertaintyFromRawBatchCsvFiles rawBatchCsvPaths uncertaintyPath
+            logCollectStage request.SeedBase "UncertaintyEnd" $"Dose uncertainty written: {uncertaintyPath}"
+
+            logCollectStage request.SeedBase "ValidationStart" "Validating final merged dose against uncertainty dose."
+            do! validateDoseMergedMatchesUncertainty summaryPath uncertaintyPath
+            logCollectStage request.SeedBase "ValidationEnd" "Final merged dose matches uncertainty dose."
 
             let manifestLines = buildCollectManifestLines effectiveRows
             logCollectStage request.SeedBase "ManifestWriteStart" $"Writing collect manifest: {manifestPath}"

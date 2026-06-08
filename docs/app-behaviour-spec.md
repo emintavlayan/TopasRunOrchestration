@@ -12,7 +12,7 @@ The application follows SAFE Light separation:
 
 - Generate workflow (preview + execution + metadata persistence)
 - Run workflow (batch list, preflight, per-node Slurm script planning, submit)
-- Collect workflow (preflight + optional exclusions, CSV merge, statistics, metadata update)
+- Collect workflow (preflight + optional exclusions, node merge, phase-space merge, raw-batch uncertainty, metadata update)
 
 ## Persistent model
 

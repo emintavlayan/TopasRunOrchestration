@@ -2,7 +2,11 @@
 
 ## Purpose
 
-`Collect` consolidates TOPAS run outputs for one generated batch (`seedBase`), producing merged phase-space CSV files and one final dose summary.
+`Collect` consolidates TOPAS run outputs for one generated batch (`seedBase`) with a serial pipeline:
+
+1. merge over nodes into `merged-over-nodes/`
+2. merge over phase-space files into `merged-over-phsp/dose_merged.csv`
+3. compute raw-batch uncertainty into `dose_with_uncertainty.csv`
 
 Current cluster model:
 
@@ -48,8 +52,9 @@ Files produced:
 
 ```text
 collect_manifest.tsv
-merged/phsp{phaseSpaceIndex}_merged.csv (one per phase-space index)
-dose_summary.csv
+merged-over-nodes/phsp{phaseSpaceIndex}_merged.csv (one per phase-space index)
+merged-over-phsp/dose_merged.csv
+dose_with_uncertainty.csv
 ```
 
 ## Preflight behavior
@@ -96,6 +101,8 @@ After exclusions, collect requires balanced remaining rows:
 
 ## Merge behavior
 
+Step 1: merge over nodes
+
 Per phase-space index:
 
 - group generated runs by `phase_space_index`
@@ -103,21 +110,73 @@ Per phase-space index:
 - require compatible row and column counts
 - preserve non-dose columns from the first file
 - sum the last numeric dose-like column across node files
-- write `phspXX_merged.csv`
+- do not change the existing numeric node-merge behavior
+- write `merged-over-nodes/phspXX_merged.csv`
 
-## Summary statistics behavior
+Step 2: merge over phase-space files
 
-Across all merged phase-space files:
+Across all files in `merged-over-nodes/`:
 
 - require compatible row and column counts
-- use the same target dose-like numeric column
-- preserve non-dose columns from first merged file
-- compute per row:
-  - `mean`
-  - `median`
-  - `standard_deviation` (sample SD, `n-1`; `0` when `count=1`)
-  - `count`
-- write `dose_summary.csv`
+- require matching voxel coordinates row-by-row
+- sum `dose_sum_Gy` voxel-by-voxel across phase-space files
+- preserve `x,y,z`
+- write `merged-over-phsp/dose_merged.csv`
+- output columns:
+  - `x`
+  - `y`
+  - `z`
+  - `dose_to_medium_Gy`
+
+## Raw-batch uncertainty behavior
+
+Step 3: compute uncertainty from the independent raw node/phase-space CSV batches.
+
+Important rule:
+
+- uncertainty is computed from the original raw batch CSV files
+- the current expected batch count is `7 * 22 = 154`, but the implementation uses the actual raw file count `m`
+- uncertainty is not computed from `merged-over-nodes/*.csv`
+- uncertainty is not computed from `merged-over-phsp/dose_merged.csv`
+
+For each voxel and raw batch dose value `D_i`:
+
+- `m = number of raw batch files`
+- `S1 = Σ D_i`
+- `S2 = Σ D_i^2`
+- `dose_to_medium_Gy = S1`
+- `sample_variance_batch = (S2 - (S1 * S1 / m)) / (m - 1)`
+- `batch_standard_deviation = sqrt(max(0.0, sample_variance_batch))`
+- `standard_uncertainty_Gy = sqrt(m) * batch_standard_deviation`
+- `relative_uncertainty_percent = 100.0 * standard_uncertainty_Gy / S1`
+
+Equivalent relative-uncertainty form:
+
+- `relative_uncertainty_percent = 100.0 * sqrt((m / (m - 1)) * (S2 - S1*S1/m)) / S1`
+
+Edge handling:
+
+- if `S1 <= 0.0`, `relative_uncertainty_percent` is written empty
+- if `m < 2`, collect fails because batch uncertainty cannot be estimated
+- tiny negative sample variance from floating-point roundoff is clamped to `0.0`
+- raw CSV files must keep row order, row count, and voxel coordinates aligned
+
+`dose_with_uncertainty.csv` columns:
+
+- `x`
+- `y`
+- `z`
+- `dose_to_medium_Gy`
+- `batch_count`
+- `mean_batch_dose_Gy`
+- `batch_standard_deviation_Gy`
+- `standard_uncertainty_Gy`
+- `relative_uncertainty_percent`
+
+Interpretation:
+
+- `dose_to_medium_Gy` remains the summed dose `S1`
+- `standard_uncertainty_Gy` is the one-sigma uncertainty of the summed dose, not of the batch mean
 
 ## Collect operation behavior
 
@@ -126,10 +185,12 @@ Across all merged phase-space files:
 1. Runs preflight.
 2. Rejects when CSV/log/row-balance preflight fails.
 3. Rejects output collisions before writing files.
-4. Merges phase-space CSV files.
-5. Computes `dose_summary.csv`.
-6. Writes `collect_manifest.tsv`.
-7. Updates `generated_batches` collect metadata.
+4. Merges raw node CSV files into `merged-over-nodes/phspXX_merged.csv`.
+5. Merges `merged-over-nodes/*.csv` into `merged-over-phsp/dose_merged.csv`.
+6. Computes `dose_with_uncertainty.csv` from the raw batch CSV files.
+7. Validates that `dose_with_uncertainty.csv` `dose_to_medium_Gy` matches `merged-over-phsp/dose_merged.csv` within floating-point tolerance.
+8. Writes `collect_manifest.tsv`.
+9. Updates `generated_batches` collect metadata.
 
 All-or-nothing for status:
 

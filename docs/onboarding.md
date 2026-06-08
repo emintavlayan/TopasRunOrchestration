@@ -35,14 +35,14 @@ Then open the client URL shown by the server.
 
 1. Generate: create one batch (`seedBase`) and input files.
 2. Run: preflight, preview Slurm script, submit with `sbatch`.
-3. Collect: preflight outputs, merge CSVs, compute summary statistics.
+3. Collect: preflight outputs, merge over nodes, merge over phase-space files, compute raw-batch uncertainty.
 
 ## 5. Key runtime folders
 
 ```text
 inputs/{seedBase}   generated TOPAS input files
 runs/{seedBase}     manifest/script and TOPAS CSV/log outputs
-outputs/{seedBase}  merged files + dose summary
+outputs/{seedBase}  merged-over-nodes + merged-over-phsp + dose_with_uncertainty.csv
 ```
 
 ## 6. Test before changes

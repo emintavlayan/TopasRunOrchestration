@@ -20,9 +20,13 @@ let runFolderPath (settings: TsebtSettings) (seedBase: string) : string =
 let outputFolderPath (settings: TsebtSettings) (seedBase: string) : string =
     Path.Combine(settings.AppRoot, settings.Paths.Outputs, seedBase)
 
-/// Resolves the absolute merged collect output folder path for one seed base.
+/// Resolves the absolute node-merged collect output folder path for one seed base.
 let mergedOutputFolderPath (settings: TsebtSettings) (seedBase: string) : string =
-    Path.Combine(outputFolderPath settings seedBase, "merged")
+    Path.Combine(outputFolderPath settings seedBase, "merged-over-nodes")
+
+/// Resolves the absolute phase-space-merged collect output folder path for one seed base.
+let mergedOverPhaseSpaceOutputFolderPath (settings: TsebtSettings) (seedBase: string) : string =
+    Path.Combine(outputFolderPath settings seedBase, "merged-over-phsp")
 
 /// Builds expected csv and log file paths from one generated run row.
 let expectedCsvAndLogPaths (row: CollectRunRow) : string * string =
@@ -43,9 +47,13 @@ let plannedMergedFiles (settings: TsebtSettings) (seedBase: string) (rows: Colle
     |> collectPhaseSpaceIndexes
     |> List.map (fun phaseSpaceIndex -> Path.Combine(outputFolder, $"phsp{phaseSpaceIndex}_merged.csv"))
 
-/// Builds planned dose summary output path.
+/// Builds planned final merged dose output path.
 let plannedSummaryPath (settings: TsebtSettings) (seedBase: string) : string =
-    Path.Combine(outputFolderPath settings seedBase, "dose_summary.csv")
+    Path.Combine(mergedOverPhaseSpaceOutputFolderPath settings seedBase, "dose_merged.csv")
+
+/// Builds planned dose uncertainty output path.
+let plannedUncertaintyPath (settings: TsebtSettings) (seedBase: string) : string =
+    Path.Combine(outputFolderPath settings seedBase, "dose_with_uncertainty.csv")
 
 /// Builds planned collect manifest output path.
 let plannedManifestPath (settings: TsebtSettings) (seedBase: string) : string =

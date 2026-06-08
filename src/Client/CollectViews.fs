@@ -19,8 +19,8 @@ let viewCollectWelcome () =
         prop.className "space-y-2 text-sm text-base-content/80"
         prop.children [
             Html.p "Collect reads TOPAS CSV/log outputs for one batch."
-            Html.p "It checks expected files, merges node outputs per phase-space, and computes dose statistics."
-            Html.p "Statistics include mean, median, standard deviation, and count."
+            Html.p "It checks expected files, merges node outputs per phase-space, merges phase-space dose, and computes raw-batch uncertainty."
+            Html.p "The final outputs are merged-over-nodes, merged-over-phsp/dose_merged.csv, and dose_with_uncertainty.csv."
         ]
     ]
 
@@ -48,7 +48,7 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
                                     Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Phase-spaces" ]
                                     Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Run status" ]
                                     Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Collect status" ]
-                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Summary path" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Final merged dose path" ]
                                 ]
                             ]
                             Html.tbody [
@@ -253,6 +253,8 @@ let viewCollectPreflight (collect: CollectModel) (dispatch: Msg -> unit) =
 let viewCollectMergeReview (collect: CollectModel) =
     match collect.Preview with
     | Loaded preview ->
+        let uncertaintyPath = System.IO.Path.Combine(preview.OutputFolder, "dose_with_uncertainty.csv")
+
         Html.div [
             prop.className "space-y-3 text-sm text-base-content/80"
             prop.children [
@@ -268,7 +270,8 @@ let viewCollectMergeReview (collect: CollectModel) =
                 | _ -> Html.none
                 Html.p $"Output folder: {preview.OutputFolder}"
                 Html.p $"Manifest: {preview.ManifestPath}"
-                Html.p $"Final summary: {preview.FinalSummaryPath}"
+                Html.p $"Final merged dose: {preview.FinalSummaryPath}"
+                Html.p $"Dose uncertainty: {uncertaintyPath}"
                 Html.p $"Effective run count: {preview.Preflight.EffectiveRunCount}"
                 Html.p $"Effective phase-space count: {preview.Preflight.EffectivePhaseSpaceCount}"
                 Html.p $"Effective node count: {preview.Preflight.EffectiveNodeCount}"
@@ -288,7 +291,8 @@ let viewCollectMergeReview (collect: CollectModel) =
                     ]
                 ]
                 Html.p "Node merge: sums dose across nodes and reports node mean, SD, SEM, and relative SEM."
-                Html.p "Final summary: sums dose across phase-space files and reports phase-space mean, median, SD, SEM, and relative SEM."
+                Html.p "Final merge: sums merged-over-nodes phase-space files into one dose_merged.csv."
+                Html.p "Uncertainty: computes per-voxel one-sigma uncertainty of the summed dose directly from the independent raw node/phase-space CSV batches."
             ]
         ]
     | Loading _ -> Html.p "Loading collect review..."
@@ -299,6 +303,8 @@ let viewCollectResult (collect: CollectModel) =
     match collect.CollectResult with
     | Loading _ -> Html.p "Running collect..."
     | Loaded value ->
+        let uncertaintyPath = System.IO.Path.Combine(value.OutputFolder, "dose_with_uncertainty.csv")
+
         Html.div [
             prop.className "space-y-2 text-sm text-base-content/80"
             prop.children [
@@ -308,7 +314,8 @@ let viewCollectResult (collect: CollectModel) =
                 Html.p $"Logs found: {value.LogFoundCount}"
                 Html.p $"Merged phase-space count: {value.MergedPhaseSpaceCount}"
                 Html.p [ prop.className "break-all"; prop.text $"Output folder: {value.OutputFolder}" ]
-                Html.p [ prop.className "break-all"; prop.text $"Summary path: {value.SummaryPath}" ]
+                Html.p [ prop.className "break-all"; prop.text $"Final merged dose path: {value.SummaryPath}" ]
+                Html.p [ prop.className "break-all"; prop.text $"Dose uncertainty path: {uncertaintyPath}" ]
                 Html.p [ prop.className "break-all"; prop.text $"Manifest path: {value.ManifestPath}" ]
                 Html.h4 [ prop.className "font-semibold"; prop.text "Merged files" ]
                 Html.div [
@@ -355,7 +362,7 @@ let viewCollectPage (collect: CollectModel) (dispatch: Msg -> unit) =
             { Title = "Welcome"; Description = "Review what Collect reads and writes." }
             { Title = "Batch"; Description = "Select a batch with TOPAS outputs." }
             { Title = "Preflight"; Description = "Check expected CSV and log files." }
-            { Title = "Review"; Description = "Review planned merge and summary outputs." }
+            { Title = "Review"; Description = "Review planned merge and uncertainty outputs." }
             { Title = "Result"; Description = "Review collected outputs." }
         ]
     let currentStepIndex =
