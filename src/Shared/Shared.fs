@@ -147,6 +147,8 @@ type CollectBatchSummary = {
     RunStatus: string option
     CollectStatus: string
     CollectSummaryPath: string option
+    HasCollectedBefore: bool
+    LatestCollectionFolder: string option
 }
 
 type CollectBatchDetails = {
@@ -164,6 +166,8 @@ type CollectBatchDetails = {
     CollectCsvMissingCount: int option
     CollectLogFoundCount: int option
     CollectLogMissingCount: int option
+    HasCollectedBefore: bool
+    LatestCollectionFolder: string option
 }
 
 type CollectPreflightCheck = {
@@ -221,6 +225,8 @@ type CollectPreviewResult = {
     FinalSummaryPath: string
     ManifestPath: string
     Preflight: CollectPreflightResult
+    HasCollectedBefore: bool
+    LatestCollectionFolder: string option
 }
 
 type CollectRequest = {

@@ -39,6 +39,13 @@ let private ensureGeneratedBatchColumn
     if not (hasColumn connection "generated_batches" columnName) then
         executeNonQuery connection $"ALTER TABLE generated_batches ADD COLUMN {columnName} {columnSqlTypeAndDefault};"
 
+/// Returns true when the given table exists in the current database.
+let private tableExists (connection: SqliteConnection) (tableName: string) : bool =
+    use command = connection.CreateCommand()
+    command.CommandText <- "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = $tableName;"
+    command.Parameters.AddWithValue("$tableName", tableName) |> ignore
+    Convert.ToInt32(command.ExecuteScalar()) > 0
+
 /// Ensures run foundation columns exist in generated_batches for backward-compatible databases.
 let private ensureRunFoundationColumns (connection: SqliteConnection) : unit =
     ensureGeneratedBatchColumn connection "run_status" "TEXT NOT NULL DEFAULT 'Generated'"
@@ -57,6 +64,69 @@ let private ensureCollectFoundationColumns (connection: SqliteConnection) : unit
     ensureGeneratedBatchColumn connection "collect_csv_missing_count" "INTEGER NULL"
     ensureGeneratedBatchColumn connection "collect_log_found_count" "INTEGER NULL"
     ensureGeneratedBatchColumn connection "collect_log_missing_count" "INTEGER NULL"
+
+/// Ensures the generated_batch_collections history table exists for recollection tracking.
+let private ensureGeneratedBatchCollectionsTable (connection: SqliteConnection) : unit =
+    executeNonQuery
+        connection
+        """CREATE TABLE IF NOT EXISTS generated_batch_collections (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  seed_base TEXT NOT NULL,
+  status TEXT NOT NULL,
+  started_at TEXT NOT NULL,
+  completed_at TEXT NULL,
+  output_folder TEXT NULL,
+  summary_path TEXT NULL,
+  csv_found_count INTEGER NULL,
+  csv_missing_count INTEGER NULL,
+  log_found_count INTEGER NULL,
+  log_missing_count INTEGER NULL,
+  error_message TEXT NULL
+);"""
+
+    executeNonQuery
+        connection
+        """CREATE INDEX IF NOT EXISTS idx_generated_batch_collections_seed_base_started_at
+ON generated_batch_collections(seed_base, started_at DESC, id DESC);"""
+
+/// Backfills collection history rows from the latest generated_batches metadata when possible.
+let private backfillExistingCollectionHistory (connection: SqliteConnection) : unit =
+    if tableExists connection "generated_batch_collections" then
+        executeNonQuery
+            connection
+            """INSERT INTO generated_batch_collections (
+  seed_base,
+  status,
+  started_at,
+  completed_at,
+  output_folder,
+  summary_path,
+  csv_found_count,
+  csv_missing_count,
+  log_found_count,
+  log_missing_count,
+  error_message
+)
+SELECT
+  b.seed_base,
+  COALESCE(NULLIF(b.collect_status, ''), 'Collected'),
+  COALESCE(b.collected_at, b.created_at),
+  b.collected_at,
+  b.collect_output_folder,
+  b.collect_summary_path,
+  b.collect_csv_found_count,
+  b.collect_csv_missing_count,
+  b.collect_log_found_count,
+  b.collect_log_missing_count,
+  NULL
+FROM generated_batches b
+WHERE b.collect_output_folder IS NOT NULL
+  AND NOT EXISTS (
+    SELECT 1
+    FROM generated_batch_collections c
+    WHERE c.seed_base = b.seed_base
+      AND c.output_folder = b.collect_output_folder
+  );"""
 
 /// Initializes SQLite file and required tables if missing.
 let initialize (settings: TsebtSettings) : Result<string, string> =
@@ -111,6 +181,8 @@ let initialize (settings: TsebtSettings) : Result<string, string> =
 
         ensureRunFoundationColumns connection
         ensureCollectFoundationColumns connection
+        ensureGeneratedBatchCollectionsTable connection
+        backfillExistingCollectionHistory connection
 
         Ok databasePath
     with ex ->

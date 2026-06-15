@@ -20,6 +20,10 @@ let private asOptionalString (value: obj) : string option =
 let private asOptionalInt (value: obj) : int option =
     if isNull value || Convert.IsDBNull value then None else Some(Convert.ToInt32 value)
 
+/// Converts one optional value into a database parameter value.
+let private toDbValue (value: 'a option) : obj =
+    value |> Option.map box |> Option.defaultValue null
+
 /// Builds sqlite connection string from configured database path.
 let private toConnectionString (settings: TsebtSettings) : string =
     let databasePath = combineAppRoot settings.AppRoot settings.Paths.Database
@@ -33,6 +37,202 @@ let private collectLogTimestampUtc () : string = DateTime.UtcNow.ToString("O")
 /// Writes one collect operation stage log line to stdout.
 let private logCollectStage (seedBase: string) (stage: string) (message: string) : unit =
     Console.WriteLine($"[{collectLogTimestampUtc()}] [Collect] [seedBase={seedBase}] [{stage}] {message}")
+
+/// Formats one sortable UTC collection folder timestamp.
+let private collectionFolderTimestampUtc () : string =
+    DateTime.UtcNow.ToString("yyyyMMddTHHmmss")
+
+/// Builds one collection folder name from a base timestamp and optional collision suffix.
+let private buildCollectionFolderName (timestamp: string) (suffix: int) : string =
+    if suffix <= 0 then
+        timestamp
+    else
+        $"{timestamp}-{suffix:D3}"
+
+/// Creates one unique timestamped collection output folder without overwriting prior outputs.
+let private createCollectionOutputFolder (settings: TsebtSettings) (seedBase: string) : Result<string, string> =
+    try
+        let baseOutputFolder = outputFolderPath settings seedBase
+        Directory.CreateDirectory(baseOutputFolder) |> ignore
+
+        let timestamp = collectionFolderTimestampUtc ()
+
+        let rec loop suffix =
+            let folderName = buildCollectionFolderName timestamp suffix
+            let candidate = collectionOutputFolderPath baseOutputFolder folderName
+
+            if Directory.Exists candidate then
+                loop (suffix + 1)
+            else
+                Directory.CreateDirectory(candidate) |> ignore
+                candidate
+
+        Ok(loop 0)
+    with ex ->
+        Error $"Failed creating timestamped collect output folder: {ex.Message}"
+
+/// Converts one absolute path into an AppRoot-relative display path when possible.
+let private toAppRootRelativePath (settings: TsebtSettings) (path: string) : string =
+    try
+        let appRootFullPath = Path.GetFullPath settings.AppRoot
+        let candidateFullPath = Path.GetFullPath path
+        Path.GetRelativePath(appRootFullPath, candidateFullPath).Replace('\\', '/')
+    with _ ->
+        path
+
+/// Writes the latest-collection marker file for one seed base.
+let private writeLatestCollectionMarker
+    (settings: TsebtSettings)
+    (seedBase: string)
+    (collectionOutputFolder: string)
+    : Result<unit, string> =
+    try
+        let markerPath = latestCollectionMarkerPath settings seedBase
+        let markerDirectory = Path.GetDirectoryName markerPath
+
+        if not (String.IsNullOrWhiteSpace markerDirectory) then
+            Directory.CreateDirectory(markerDirectory) |> ignore
+
+        File.WriteAllText(markerPath, toAppRootRelativePath settings collectionOutputFolder)
+        Ok()
+    with ex ->
+        Error $"Failed writing latest collection marker: {ex.Message}"
+
+/// Inserts one collection-attempt history row and returns its database identifier.
+let private createCollectionAttempt (connection: SqliteConnection) (seedBase: string) : Result<int64, string> =
+    try
+        let startedAt = DateTime.UtcNow.ToString("O")
+        use command = connection.CreateCommand()
+        command.CommandText <-
+            """INSERT INTO generated_batch_collections (
+  seed_base,
+  status,
+  started_at,
+  completed_at,
+  output_folder,
+  summary_path,
+  csv_found_count,
+  csv_missing_count,
+  log_found_count,
+  log_missing_count,
+  error_message
+) VALUES (
+  $seedBase,
+  'InProgress',
+  $startedAt,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL,
+  NULL
+);"""
+
+        command.Parameters.AddWithValue("$seedBase", seedBase) |> ignore
+        command.Parameters.AddWithValue("$startedAt", startedAt) |> ignore
+        command.ExecuteNonQuery() |> ignore
+
+        use idCommand = connection.CreateCommand()
+        idCommand.CommandText <- "SELECT last_insert_rowid();"
+        Ok(Convert.ToInt64(idCommand.ExecuteScalar()))
+    with ex ->
+        Error $"Failed creating collect attempt history: {ex.Message}"
+
+/// Marks one collection-attempt history row as successfully completed.
+let private markCollectionAttemptSucceeded
+    (connection: SqliteConnection)
+    (attemptId: int64)
+    (completedAt: string)
+    (outputFolder: string)
+    (summaryPath: string)
+    (preflight: CollectPreflightResult)
+    : Result<unit, string> =
+    try
+        use command = connection.CreateCommand()
+        command.CommandText <-
+            """UPDATE generated_batch_collections
+SET status = 'Collected',
+    completed_at = $completedAt,
+    output_folder = $outputFolder,
+    summary_path = $summaryPath,
+    csv_found_count = $collectCsvFoundCount,
+    csv_missing_count = $collectCsvMissingCount,
+    log_found_count = $collectLogFoundCount,
+    log_missing_count = $collectLogMissingCount,
+    error_message = NULL
+WHERE id = $attemptId;"""
+
+        command.Parameters.AddWithValue("$completedAt", completedAt) |> ignore
+        command.Parameters.AddWithValue("$outputFolder", outputFolder) |> ignore
+        command.Parameters.AddWithValue("$summaryPath", summaryPath) |> ignore
+        command.Parameters.AddWithValue("$collectCsvFoundCount", preflight.FoundCsvCount) |> ignore
+        command.Parameters.AddWithValue("$collectCsvMissingCount", preflight.MissingCsvCount) |> ignore
+        command.Parameters.AddWithValue("$collectLogFoundCount", preflight.FoundLogCount) |> ignore
+        command.Parameters.AddWithValue("$collectLogMissingCount", preflight.MissingLogCount) |> ignore
+        command.Parameters.AddWithValue("$attemptId", attemptId) |> ignore
+        command.ExecuteNonQuery() |> ignore
+        Ok()
+    with ex ->
+        Error $"Failed marking collect attempt success: {ex.Message}"
+
+/// Marks one collection-attempt history row as failed.
+let private markCollectionAttemptFailed
+    (connection: SqliteConnection)
+    (attemptId: int64)
+    (outputFolder: string option)
+    (summaryPath: string option)
+    (preflight: CollectPreflightResult option)
+    (errorMessage: string)
+    : Result<unit, string> =
+    try
+        use command = connection.CreateCommand()
+        command.CommandText <-
+            """UPDATE generated_batch_collections
+SET status = 'Failed',
+    completed_at = $completedAt,
+    output_folder = $outputFolder,
+    summary_path = $summaryPath,
+    csv_found_count = $collectCsvFoundCount,
+    csv_missing_count = $collectCsvMissingCount,
+    log_found_count = $collectLogFoundCount,
+    log_missing_count = $collectLogMissingCount,
+    error_message = $errorMessage
+WHERE id = $attemptId;"""
+
+        let completedAt = DateTime.UtcNow.ToString("O")
+        command.Parameters.AddWithValue("$completedAt", completedAt) |> ignore
+        command.Parameters.AddWithValue("$outputFolder", toDbValue outputFolder) |> ignore
+        command.Parameters.AddWithValue("$summaryPath", toDbValue summaryPath) |> ignore
+        command.Parameters.AddWithValue("$collectCsvFoundCount", toDbValue (preflight |> Option.map _.FoundCsvCount)) |> ignore
+        command.Parameters.AddWithValue("$collectCsvMissingCount", toDbValue (preflight |> Option.map _.MissingCsvCount)) |> ignore
+        command.Parameters.AddWithValue("$collectLogFoundCount", toDbValue (preflight |> Option.map _.FoundLogCount)) |> ignore
+        command.Parameters.AddWithValue("$collectLogMissingCount", toDbValue (preflight |> Option.map _.MissingLogCount)) |> ignore
+        command.Parameters.AddWithValue("$errorMessage", errorMessage) |> ignore
+        command.Parameters.AddWithValue("$attemptId", attemptId) |> ignore
+        command.ExecuteNonQuery() |> ignore
+        Ok()
+    with ex ->
+        Error $"Failed marking collect attempt failure: {ex.Message}"
+
+/// Records one failed collection-attempt history update without masking the main error.
+let private recordCollectionAttemptFailureBestEffort
+    (seedBase: string)
+    (connection: SqliteConnection)
+    (attemptId: int64 option)
+    (outputFolder: string option)
+    (summaryPath: string option)
+    (preflight: CollectPreflightResult option)
+    (errorMessage: string)
+    : unit =
+    match attemptId with
+    | None -> ()
+    | Some value ->
+        match markCollectionAttemptFailed connection value outputFolder summaryPath preflight errorMessage with
+        | Ok() -> ()
+        | Error historyError ->
+            logCollectStage seedBase "AttemptFailureUpdateError" $"{historyError}; originalError={errorMessage}"
 
 /// Reads collect batch summaries from generated batch and run metadata.
 let private readCollectBatchSummaries (connection: SqliteConnection) : Result<CollectBatchSummary list, string> =
@@ -48,16 +248,19 @@ let private readCollectBatchSummaries (connection: SqliteConnection) : Result<Co
   COUNT(DISTINCT r.phase_space_index) AS phase_space_count,
   b.run_status,
   COALESCE(b.collect_status, 'NotCollected') AS collect_status,
-  b.collect_summary_path
+  b.collect_summary_path,
+  b.collect_output_folder
 FROM generated_batches b
 LEFT JOIN generated_runs r ON r.batch_id = b.id
-GROUP BY b.id, b.seed_base, b.created_at, b.run_status, b.collect_status, b.collect_summary_path
+GROUP BY b.id, b.seed_base, b.created_at, b.run_status, b.collect_status, b.collect_summary_path, b.collect_output_folder
 ORDER BY b.created_at DESC;"""
 
         use reader = command.ExecuteReader()
         let rows = ResizeArray<CollectBatchSummary>()
 
         while reader.Read() do
+            let latestCollectionFolder = asOptionalString (reader.GetValue(8))
+
             rows.Add(
                 {
                     SeedBase = reader.GetString(0)
@@ -68,6 +271,8 @@ ORDER BY b.created_at DESC;"""
                     RunStatus = asOptionalString (reader.GetValue(5))
                     CollectStatus = reader.GetString(6)
                     CollectSummaryPath = asOptionalString (reader.GetValue(7))
+                    HasCollectedBefore = latestCollectionFolder.IsSome
+                    LatestCollectionFolder = latestCollectionFolder
                 }
             )
 
@@ -120,6 +325,8 @@ LIMIT 1;"""
         if not (reader.Read()) then
             Error $"Collect batch not found for seed base: {seedBase}"
         else
+            let latestCollectionFolder = asOptionalString (reader.GetValue(8))
+
             Ok
                 {
                     SeedBase = reader.GetString(0)
@@ -136,6 +343,8 @@ LIMIT 1;"""
                     CollectCsvMissingCount = asOptionalInt (reader.GetValue(11))
                     CollectLogFoundCount = asOptionalInt (reader.GetValue(12))
                     CollectLogMissingCount = asOptionalInt (reader.GetValue(13))
+                    HasCollectedBefore = latestCollectionFolder.IsSome
+                    LatestCollectionFolder = latestCollectionFolder
                 }
     with ex ->
         Error $"Failed reading collect batch details: {ex.Message}"
@@ -206,6 +415,7 @@ let previewCollect (settings: TsebtSettings) (request: CollectPreviewRequest) : 
         connection.Open()
 
         result {
+            let! details = readCollectBatchDetailsRow connection request.SeedBase
             let! rows = readCollectRunRows connection request.SeedBase
             let effectiveRows =
                 applyCollectExclusions rows request.ExcludedPhaseSpaceIndexes request.ExcludedNodeDigits
@@ -217,7 +427,8 @@ let previewCollect (settings: TsebtSettings) (request: CollectPreviewRequest) : 
                     rows
                     request.ExcludedPhaseSpaceIndexes
                     request.ExcludedNodeDigits
-            let outputFolder = outputFolderPath settings request.SeedBase
+            let outputFolder =
+                collectionOutputFolderPath (outputFolderPath settings request.SeedBase) "<timestamp>"
 
             return
                 {
@@ -230,6 +441,8 @@ let previewCollect (settings: TsebtSettings) (request: CollectPreviewRequest) : 
                     FinalSummaryPath = plannedSummaryPath settings request.SeedBase
                     ManifestPath = plannedManifestPath settings request.SeedBase
                     Preflight = preflight
+                    HasCollectedBefore = details.HasCollectedBefore
+                    LatestCollectionFolder = details.LatestCollectionFolder
                 }
         }
     with ex ->
@@ -277,7 +490,7 @@ let private writeCollectManifest (manifestPath: string) (manifestLines: string l
 
 /// Merges node csv files grouped by phase-space index.
 let private mergePhaseSpaceCsvFiles
-    (settings: TsebtSettings)
+    (collectionOutputFolder: string)
     (seedBase: string)
     (rows: CollectRunRow list)
     : Result<CollectedPhaseSpaceResult list, string> =
@@ -291,7 +504,8 @@ let private mergePhaseSpaceCsvFiles
             |> List.map fst
             |> List.distinct
 
-        let outputPath = Path.Combine(mergedOutputFolderPath settings seedBase, $"phsp{phaseSpaceIndex}_merged.csv")
+        let outputPath =
+            Path.Combine(mergedOutputFolderPathInCollection collectionOutputFolder, $"phsp{phaseSpaceIndex}_merged.csv")
 
         result {
             logCollectStage
@@ -351,17 +565,21 @@ let private updateCollectedBatchMetadata
 
 /// Executes full collect operation for one seed base.
 let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<CollectResult, string> =
+    let mutable attemptId: int64 option = None
+    let mutable attemptedOutputFolder: string option = None
+    let mutable attemptedSummaryPath: string option = None
+    let mutable attemptedPreflight: CollectPreflightResult option = None
+
     try
         logCollectStage request.SeedBase "Start" "Collect batch request received."
         use connection = new SqliteConnection(toConnectionString settings)
         connection.Open()
 
-        result {
-            let! details = getCollectBatchDetails settings request.SeedBase
-
-            if String.Equals(details.CollectStatus, "Collected", StringComparison.OrdinalIgnoreCase) then
-                return! Error $"Batch {request.SeedBase} has already been collected."
-
+        let operationResult =
+            result {
+            let! _details = readCollectBatchDetailsRow connection request.SeedBase
+            let! createdAttemptId = createCollectionAttempt connection request.SeedBase
+            attemptId <- Some createdAttemptId
             let! rows = readCollectRunRows connection request.SeedBase
             let effectiveRows =
                 applyCollectExclusions rows request.ExcludedPhaseSpaceIndexes request.ExcludedNodeDigits
@@ -373,6 +591,7 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
                     rows
                     request.ExcludedPhaseSpaceIndexes
                     request.ExcludedNodeDigits
+            attemptedPreflight <- Some preflight
             logCollectStage
                 request.SeedBase
                 "Preflight"
@@ -381,11 +600,13 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
             if not preflight.CanCollect then
                 return! Error $"Collect preflight failed for seed base: {request.SeedBase}"
 
-            let outputFolder = outputFolderPath settings request.SeedBase
-            let summaryPath = plannedSummaryPath settings request.SeedBase
-            let uncertaintyPath = plannedUncertaintyPath settings request.SeedBase
-            let manifestPath = plannedManifestPath settings request.SeedBase
-            let plannedMergedFilesList = plannedMergedFiles settings request.SeedBase effectiveRows
+            let! outputFolder = createCollectionOutputFolder settings request.SeedBase
+            attemptedOutputFolder <- Some outputFolder
+            let summaryPath = plannedSummaryPathInOutputFolder outputFolder
+            attemptedSummaryPath <- Some summaryPath
+            let uncertaintyPath = plannedUncertaintyPathInOutputFolder outputFolder
+            let manifestPath = plannedManifestPathInOutputFolder outputFolder
+            let plannedMergedFilesList = plannedMergedFilesInOutputFolder outputFolder effectiveRows
             let rawBatchCsvPaths =
                 effectiveRows
                 |> List.map expectedCsvAndLogPaths
@@ -397,7 +618,7 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
 
             logCollectStage request.SeedBase "MergeStart" "Starting phase-space CSV merge."
 
-            let! mergedFiles = mergePhaseSpaceCsvFiles settings request.SeedBase effectiveRows
+            let! mergedFiles = mergePhaseSpaceCsvFiles outputFolder request.SeedBase effectiveRows
             let mergedPaths = mergedFiles |> List.map _.MergedFilePath
 
             logCollectStage
@@ -422,10 +643,18 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
             do! writeCollectManifest manifestPath manifestLines
             logCollectStage request.SeedBase "ManifestWriteEnd" $"Collect manifest written: {manifestPath}"
 
+            logCollectStage request.SeedBase "LatestMarkerWriteStart" "Writing latest collection marker."
+            do! writeLatestCollectionMarker settings request.SeedBase outputFolder
+            logCollectStage request.SeedBase "LatestMarkerWriteEnd" "Latest collection marker written."
+
             logCollectStage request.SeedBase "DatabaseUpdateStart" "Updating generated batch collect metadata."
-            let! _collectedAt =
+            let! collectedAt =
                 updateCollectedBatchMetadata connection request.SeedBase outputFolder summaryPath preflight
             logCollectStage request.SeedBase "DatabaseUpdateEnd" "Generated batch collect metadata updated."
+
+            logCollectStage request.SeedBase "AttemptHistoryUpdateStart" "Marking collection attempt as completed."
+            do! markCollectionAttemptSucceeded connection createdAttemptId collectedAt outputFolder summaryPath preflight
+            logCollectStage request.SeedBase "AttemptHistoryUpdateEnd" "Collection attempt history updated."
 
             logCollectStage request.SeedBase "Success" "Collect completed successfully."
 
@@ -443,6 +672,36 @@ let collectBatch (settings: TsebtSettings) (request: CollectRequest) : Result<Co
                     Status = "Collected"
                 }
         }
+
+        match operationResult with
+        | Ok collected -> Ok collected
+        | Error errorMessage ->
+            recordCollectionAttemptFailureBestEffort
+                request.SeedBase
+                connection
+                attemptId
+                attemptedOutputFolder
+                attemptedSummaryPath
+                attemptedPreflight
+                errorMessage
+
+            Error errorMessage
     with ex ->
+        let errorMessage = $"Failed executing collect operation: {ex.Message}"
         logCollectStage request.SeedBase "Exception" $"Collect failed with exception: {ex.Message}"
-        Error $"Failed executing collect operation: {ex.Message}"
+
+        try
+            use connection = new SqliteConnection(toConnectionString settings)
+            connection.Open()
+            recordCollectionAttemptFailureBestEffort
+                request.SeedBase
+                connection
+                attemptId
+                attemptedOutputFolder
+                attemptedSummaryPath
+                attemptedPreflight
+                errorMessage
+        with _ ->
+            ()
+
+        Error errorMessage

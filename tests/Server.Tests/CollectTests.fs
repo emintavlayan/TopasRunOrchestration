@@ -55,6 +55,10 @@ let private writeMergedPhaseSpaceCsv (path: string) (rows: (string * string * st
 
     File.WriteAllLines(path, lines)
 
+/// Converts one absolute path to an AppRoot-relative forward-slash display path for marker assertions.
+let private toRelativeDisplayPath (appRoot: string) (absolutePath: string) : string =
+    Path.GetRelativePath(appRoot, absolutePath).Replace('\\', '/')
+
 [<Fact>]
 let ``Collect preflight blocks missing csv and missing log`` () =
     let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-preflight-{Guid.NewGuid():N}")
@@ -487,15 +491,19 @@ let ``Collect operation writes outputs and updates status`` () =
                     }
             )
         Assert.Equal("Collected", result.Status)
-        let outputFolder = Path.Combine(appRoot, "outputs", "1001")
-        let mergedOverNodesFolder = Path.Combine(outputFolder, "merged-over-nodes")
-        let mergedOverPhspFolder = Path.Combine(outputFolder, "merged-over-phsp")
+        let outputRootFolder = Path.Combine(appRoot, "outputs", "1001")
+        let latestMarkerPath = Path.Combine(outputRootFolder, "latest_collection.txt")
+        Assert.StartsWith(outputRootFolder, result.OutputFolder, StringComparison.OrdinalIgnoreCase)
+        let mergedOverNodesFolder = Path.Combine(result.OutputFolder, "merged-over-nodes")
+        let mergedOverPhspFolder = Path.Combine(result.OutputFolder, "merged-over-phsp")
         let mergedDosePath = Path.Combine(mergedOverPhspFolder, "dose_merged.csv")
-        let uncertaintyPath = Path.Combine(outputFolder, "dose_with_uncertainty.csv")
-        Assert.True(File.Exists(Path.Combine(outputFolder, "collect_manifest.tsv")))
+        let uncertaintyPath = Path.Combine(result.OutputFolder, "dose_with_uncertainty.csv")
+        Assert.True(File.Exists(Path.Combine(result.OutputFolder, "collect_manifest.tsv")))
         Assert.True(File.Exists(Path.Combine(mergedOverNodesFolder, "phsp01_merged.csv")))
         Assert.True(File.Exists(mergedDosePath))
         Assert.True(File.Exists(uncertaintyPath))
+        Assert.True(File.Exists(latestMarkerPath))
+        Assert.Equal(toRelativeDisplayPath appRoot result.OutputFolder, File.ReadAllText(latestMarkerPath))
         Assert.Equal(mergedDosePath, result.SummaryPath)
         let mergedHeader = File.ReadLines(Path.Combine(mergedOverNodesFolder, "phsp01_merged.csv")) |> Seq.head
         let summaryHeader = File.ReadLines(mergedDosePath) |> Seq.head
@@ -515,6 +523,88 @@ let ``Collect operation writes outputs and updates status`` () =
         statusCommand.CommandText <- "SELECT collect_status FROM generated_batches WHERE seed_base = '1001';"
         let status = string (statusCommand.ExecuteScalar())
         Assert.Equal("Collected", status)
+    finally
+        cleanupTestDirectory appRoot
+
+[<Fact>]
+let ``Collect operation allows recollection and preserves prior timestamped outputs`` () =
+    let appRoot = Path.Combine(Path.GetTempPath(), $"xunit-collect-recollect-{Guid.NewGuid():N}")
+    Directory.CreateDirectory(appRoot) |> ignore
+
+    try
+        let settings = buildSettings appRoot
+        assertOk (Bootstrap.ensureRootFolders settings) |> ignore
+        assertOk (initialize settings) |> ignore
+
+        let inputFolder = Path.Combine(appRoot, "inputs", "1043")
+        let runFolder = Path.Combine(appRoot, "runs", "1043")
+        Directory.CreateDirectory(inputFolder) |> ignore
+        Directory.CreateDirectory(runFolder) |> ignore
+
+        let rows = [
+            ("seed10431_phsp01", "01", "1", Path.Combine(inputFolder, "seed10431_phsp01.txt"), Path.Combine(runFolder, "seed10431_phsp01"))
+            ("seed10432_phsp01", "01", "2", Path.Combine(inputFolder, "seed10432_phsp01.txt"), Path.Combine(runFolder, "seed10432_phsp01"))
+        ]
+
+        let dbPath = Path.Combine(appRoot, "database", "app.db")
+        let csb = SqliteConnectionStringBuilder()
+        csb.DataSource <- dbPath
+        use conn = new SqliteConnection(csb.ConnectionString)
+        conn.Open()
+        seedGeneratedBatch conn "1043" rows
+
+        File.WriteAllText(Path.Combine(inputFolder, "seed10431_phsp01.txt"), "input")
+        File.WriteAllText(Path.Combine(inputFolder, "seed10432_phsp01.txt"), "input")
+        File.WriteAllText(Path.Combine(runFolder, "seed10431_phsp01.csv"), "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,1")
+        File.WriteAllText(Path.Combine(runFolder, "seed10432_phsp01.csv"), "# TOPAS Version...\n# DoseToMedium ( Gy ) : Sum\n0,0,0,2")
+        File.WriteAllText(Path.Combine(runFolder, "seed10431_phsp01.log"), successfulTopasFooter)
+        File.WriteAllText(Path.Combine(runFolder, "seed10432_phsp01.log"), successfulTopasFooter)
+
+        let firstResult =
+            assertOk (
+                collectBatch
+                    settings
+                    {
+                        SeedBase = "1043"
+                        ExcludedPhaseSpaceIndexes = []
+                        ExcludedNodeDigits = []
+                    }
+            )
+
+        let secondResult =
+            assertOk (
+                collectBatch
+                    settings
+                    {
+                        SeedBase = "1043"
+                        ExcludedPhaseSpaceIndexes = []
+                        ExcludedNodeDigits = []
+                    }
+            )
+
+        Assert.NotEqual<string>(firstResult.OutputFolder, secondResult.OutputFolder)
+        Assert.True(Directory.Exists(firstResult.OutputFolder))
+        Assert.True(Directory.Exists(secondResult.OutputFolder))
+        Assert.True(File.Exists(Path.Combine(firstResult.OutputFolder, "merged-over-phsp", "dose_merged.csv")))
+        Assert.True(File.Exists(Path.Combine(secondResult.OutputFolder, "merged-over-phsp", "dose_merged.csv")))
+
+        let latestMarkerPath = Path.Combine(appRoot, "outputs", "1043", "latest_collection.txt")
+        Assert.True(File.Exists(latestMarkerPath))
+        Assert.Equal(toRelativeDisplayPath appRoot secondResult.OutputFolder, File.ReadAllText(latestMarkerPath))
+
+        let previewAfterRecollect =
+            assertOk (
+                previewCollect
+                    settings
+                    {
+                        SeedBase = "1043"
+                        ExcludedPhaseSpaceIndexes = []
+                        ExcludedNodeDigits = []
+                    }
+            )
+
+        Assert.True(previewAfterRecollect.HasCollectedBefore)
+        Assert.Equal(Some secondResult.OutputFolder, previewAfterRecollect.LatestCollectionFolder)
     finally
         cleanupTestDirectory appRoot
 
@@ -574,7 +664,7 @@ let ``Collect operation applies phase-space exclusions to merge and manifest`` (
         Assert.Equal(2, result.ExpectedRunCount)
         Assert.Equal(1, result.MergedPhaseSpaceCount)
 
-        let outputFolder = Path.Combine(appRoot, "outputs", "1001")
+        let outputFolder = result.OutputFolder
         Assert.True(File.Exists(Path.Combine(outputFolder, "merged-over-nodes", "phsp01_merged.csv")))
         Assert.False(File.Exists(Path.Combine(outputFolder, "merged-over-nodes", "phsp20_merged.csv")))
         Assert.True(File.Exists(Path.Combine(outputFolder, "merged-over-phsp", "dose_merged.csv")))
