@@ -372,6 +372,35 @@ let ``Collect uncertainty writes zero relative uncertainty for identical raw bat
     finally
         cleanupTestDirectory folder
 
+/// Verifies summed-dose uncertainty fails clearly when fewer than two batches are available.
+[<Fact>]
+let ``Collect uncertainty metrics fail when fewer than two batches are provided`` () =
+    let result = computeVoxelUncertaintyMetrics 2.0 4.0 1
+
+    match result with
+    | Ok _ -> Assert.True(false, "Expected uncertainty calculation to fail for m < 2.")
+    | Error message -> Assert.Contains("At least two batch values", message)
+
+/// Verifies tiny negative variance numerator is clamped to zero for floating-point roundoff.
+[<Fact>]
+let ``Collect uncertainty metrics clamp tiny negative variance numerator to zero`` () =
+    let result = assertOk (computeVoxelUncertaintyMetrics 3.0 2.9999999999999996 3)
+
+    Assert.Equal(3.0, result.DoseSum, 12)
+    Assert.Equal(1.0, result.MeanBatchDose, 12)
+    Assert.Equal(0.0, result.BatchStandardDeviation, 12)
+    Assert.Equal(0.0, result.StandardUncertaintyOfSummedDose, 12)
+    Assert.Equal(Some 0.0, result.RelativeUncertaintyPercent)
+
+/// Verifies clearly invalid negative variance numerator fails instead of being silently clamped.
+[<Fact>]
+let ``Collect uncertainty metrics fail on negative variance beyond roundoff tolerance`` () =
+    let result = computeVoxelUncertaintyMetrics 10.0 1.0 3
+
+    match result with
+    | Ok _ -> Assert.True(false, "Expected uncertainty calculation to fail for invalid negative variance.")
+    | Error message -> Assert.Contains("negative beyond floating-point roundoff tolerance", message)
+
 [<Fact>]
 let ``Collect final merge fails on mismatched row counts`` () =
     let folder = Path.Combine(Path.GetTempPath(), $"xunit-final-merge-mismatch-{Guid.NewGuid():N}")

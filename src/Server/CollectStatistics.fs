@@ -12,7 +12,7 @@ type VoxelUncertaintyMetrics = {
     BatchCount: int
     MeanBatchDose: float
     BatchStandardDeviation: float
-    StandardUncertainty: float
+    StandardUncertaintyOfSummedDose: float
     RelativeUncertaintyPercent: float option
 }
 
@@ -262,14 +262,42 @@ let private readNextDataRow (source: StreamingDoseSource) : string array option 
         Some pending
     | None -> tryReadNextNonBlankRow source.Reader
 
-/// Computes sample standard deviation from count, sum, and sum-of-squares.
-let private sampleStandardDeviationFromMoments (count: int) (sum: float) (sumSquares: float) : float =
+/// Returns the variance roundoff tolerance derived from the moment magnitudes.
+let private varianceNumeratorRoundoffTolerance (sum: float) (sumSquares: float) (count: int) : float =
+    let expectedSquareSum = (sum * sum) / float count
+    let scale = max 1.0 (max (abs sumSquares) (abs expectedSquareSum))
+    1e-12 * scale
+
+/// Computes sample variance across independent batch doses from count, sum, and sum-of-squares.
+let private computeSampleVarianceAcrossIndependentBatchDoses
+    (count: int)
+    (sum: float)
+    (sumSquares: float)
+    : Result<float, string> =
     if count < 2 then
-        0.0
+        Error "At least two batch values are required to compute sample uncertainty."
     else
-        let numerator = sumSquares - ((sum * sum) / float count)
-        let variance = Math.Max(0.0, numerator / float (count - 1))
-        sqrt variance
+        let varianceNumerator = sumSquares - ((sum * sum) / float count)
+
+        if varianceNumerator < 0.0 then
+            let tolerance = varianceNumeratorRoundoffTolerance sum sumSquares count
+
+            if abs varianceNumerator <= tolerance then
+                Ok 0.0
+            else
+                Error
+                    $"Sample variance numerator is negative beyond floating-point roundoff tolerance. numerator={formatFloat varianceNumerator}; tolerance={formatFloat tolerance}."
+        else
+            Ok(varianceNumerator / float (count - 1))
+
+/// Computes sample standard deviation across independent batch doses from count, sum, and sum-of-squares.
+let private computeSampleStandardDeviationAcrossIndependentBatchDoses
+    (count: int)
+    (sum: float)
+    (sumSquares: float)
+    : Result<float, string> =
+    computeSampleVarianceAcrossIndependentBatchDoses count sum sumSquares
+    |> Result.map sqrt
 
 /// Computes voxel uncertainty from independent raw dose batches.
 let computeVoxelUncertaintyMetrics
@@ -277,28 +305,31 @@ let computeVoxelUncertaintyMetrics
     (sumSquares: float)
     (batchCount: int)
     : Result<VoxelUncertaintyMetrics, string> =
-    if batchCount < 2 then
-        Error "At least two batch values are required to compute sample uncertainty."
-    else
+    result {
+        if batchCount < 2 then
+            return! Error "At least two batch values are required to compute uncertainty of the summed dose."
+
         let meanBatchDose = doseSum / float batchCount
-        let batchStandardDeviation = sampleStandardDeviationFromMoments batchCount doseSum sumSquares
-        let standardUncertainty = sqrt (float batchCount) * batchStandardDeviation
+        let! batchStandardDeviation =
+            computeSampleStandardDeviationAcrossIndependentBatchDoses batchCount doseSum sumSquares
+        let standardUncertaintyOfSummedDose = sqrt (float batchCount) * batchStandardDeviation
 
         let relativeUncertaintyPercent =
             if doseSum <= 0.0 then
                 None
             else
-                Some(100.0 * standardUncertainty / doseSum)
+                Some(100.0 * standardUncertaintyOfSummedDose / doseSum)
 
-        Ok
+        return
             {
                 DoseSum = doseSum
                 BatchCount = batchCount
                 MeanBatchDose = meanBatchDose
                 BatchStandardDeviation = batchStandardDeviation
-                StandardUncertainty = standardUncertainty
+                StandardUncertaintyOfSummedDose = standardUncertaintyOfSummedDose
                 RelativeUncertaintyPercent = relativeUncertaintyPercent
             }
+    }
 
 /// Extracts x,y,z coordinate values from the first three non-dose columns.
 let private extractCoordinateColumns (baseRow: string array) (doseColumnIndex: int) : Result<string * string * string, string> =
@@ -345,13 +376,13 @@ let private buildDoseMergedRow (xValue: string) (yValue: string) (zValue: string
     builder.Append(',').Append(formatFloat doseSum) |> ignore
     builder.ToString()
 
-/// Builds canonical dose-with-uncertainty header line.
+/// Builds canonical dose-with-uncertainty header line for summed-dose uncertainty output.
 let private buildDoseWithUncertaintyHeaders () : string list =
     [
         "x,y,z,dose_to_medium_Gy,batch_count,mean_batch_dose_Gy,batch_standard_deviation_Gy,standard_uncertainty_Gy,relative_uncertainty_percent"
     ]
 
-/// Builds one dose-with-uncertainty output row.
+/// Builds one dose-with-uncertainty output row for the summed-dose uncertainty metrics.
 let private buildDoseWithUncertaintyRow
     (xValue: string)
     (yValue: string)
@@ -367,7 +398,7 @@ let private buildDoseWithUncertaintyRow
     builder.Append(',').Append(metrics.BatchCount) |> ignore
     builder.Append(',').Append(formatFloat metrics.MeanBatchDose) |> ignore
     builder.Append(',').Append(formatFloat metrics.BatchStandardDeviation) |> ignore
-    builder.Append(',').Append(formatFloat metrics.StandardUncertainty) |> ignore
+    builder.Append(',').Append(formatFloat metrics.StandardUncertaintyOfSummedDose) |> ignore
     builder.Append(',') |> ignore
 
     match metrics.RelativeUncertaintyPercent with
