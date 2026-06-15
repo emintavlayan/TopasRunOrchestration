@@ -45,17 +45,32 @@ Expected TOPAS log per run:
 Collect output folder:
 
 ```text
-{AppRoot}/{Paths.Outputs}/{seedBase}
+{AppRoot}/{Paths.Outputs}/{seedBase}/{timestamp}
 ```
 
 Files produced:
 
 ```text
-collect_manifest.tsv
-merged-over-nodes/phsp{phaseSpaceIndex}_merged.csv (one per phase-space index)
-merged-over-phsp/dose_merged.csv
-dose_with_uncertainty.csv
+{AppRoot}/{Paths.Outputs}/{seedBase}/latest_collection.txt
+{AppRoot}/{Paths.Outputs}/{seedBase}/{timestamp}/collect_manifest.tsv
+{AppRoot}/{Paths.Outputs}/{seedBase}/{timestamp}/merged-over-nodes/phsp{phaseSpaceIndex}_merged.csv (one per phase-space index)
+{AppRoot}/{Paths.Outputs}/{seedBase}/{timestamp}/merged-over-phsp/dose_merged.csv
+{AppRoot}/{Paths.Outputs}/{seedBase}/{timestamp}/dose_with_uncertainty.csv
 ```
+
+Timestamp rules:
+
+- `{timestamp}` uses sortable UTC folder names in `yyyyMMddTHHmmss` format
+- if the timestamp folder already exists, Collect appends a safe numeric suffix
+- `latest_collection.txt` stores the latest collection folder path for portability
+
+## Recollection policy
+
+- `runs/{seedBase}/` is the immutable source folder for Collect
+- each timestamped output folder is one collection attempt
+- recollection is allowed and does not overwrite prior outputs
+- previous collection folders are retained for audit and comparison
+- recollection is expected when merge logic or uncertainty logic changes
 
 ## Preflight behavior
 
@@ -216,13 +231,15 @@ Because the source is a pre-simulated phase-space file, latent variance can rema
 
 1. Runs preflight.
 2. Rejects when CSV/log/row-balance preflight fails.
-3. Rejects output collisions before writing files.
-4. Merges raw node CSV files into `merged-over-nodes/phspXX_merged.csv`.
-5. Merges `merged-over-nodes/*.csv` into `merged-over-phsp/dose_merged.csv`.
-6. Computes `dose_with_uncertainty.csv` from the raw batch CSV files.
-7. Validates that `dose_with_uncertainty.csv` `dose_to_medium_Gy` matches `merged-over-phsp/dose_merged.csv` within floating-point tolerance.
-8. Writes `collect_manifest.tsv`.
-9. Updates `generated_batches` collect metadata.
+3. Creates a new timestamped output folder under `outputs/{seedBase}/`.
+4. Rejects output collisions before writing files.
+5. Merges raw node CSV files into `merged-over-nodes/phspXX_merged.csv`.
+6. Merges `merged-over-nodes/*.csv` into `merged-over-phsp/dose_merged.csv`.
+7. Computes `dose_with_uncertainty.csv` from the raw batch CSV files.
+8. Validates that `dose_with_uncertainty.csv` `dose_to_medium_Gy` matches `merged-over-phsp/dose_merged.csv` within floating-point tolerance.
+9. Writes `collect_manifest.tsv`.
+10. Writes `latest_collection.txt`.
+11. Updates `generated_batches` latest collect metadata and appends one `generated_batch_collections` history row.
 
 All-or-nothing for status:
 
@@ -242,10 +259,16 @@ All-or-nothing for status:
 - `collect_log_found_count`
 - `collect_log_missing_count`
 
+`generated_batch_collections` history rows:
+
+- one row per collect attempt
+- stores `seed_base`, status, timestamps, output folder, summary path, file counts, and error message
+- preserves collect history even though `generated_batches` stores only the latest collect metadata
+
 ## Current limitations
 
 - CSV parser assumes compatible row/column structure across files being merged.
 - Merge logic assumes the last numeric column is the dose-like value to sum.
 - Missing/empty/non-numeric CSV files block collect.
 - Missing TOPAS completion timing footer blocks collect.
-- No recollect/overwrite workflow in current version.
+- No manual "collect into an arbitrary existing run folder" workflow yet.

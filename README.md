@@ -38,7 +38,7 @@ The app is driven by one configured root path (`Tsebt:AppRoot`).
 templates/   TOPAS source template/component files
 inputs/      generated TOPAS input files at inputs/{seedBase}/
 runs/        run artifacts and TOPAS run outputs at runs/{seedBase}/
-outputs/     collect outputs at outputs/{seedBase}/
+outputs/     collect outputs at outputs/{seedBase}/{timestamp}/ plus latest_collection.txt
 database/    SQLite database
 logs/        application/runtime logs
 ```
@@ -47,6 +47,7 @@ Notes:
 
 - Phase-space files are not copied or managed by this app.
 - Collect reads from shared `runs/{seedBase}` in the current model.
+- `runs/{seedBase}` is the immutable source folder for recollection.
 
 ## Generate summary
 
@@ -90,16 +91,25 @@ srun --nodes=1 --ntasks=1 --nodelist="$NODE_NAME" "$TOPAS" "$INPUT_FILE" > "$LOG
 - Produces:
 
 ```text
-outputs/{seedBase}/collect_manifest.tsv
-outputs/{seedBase}/merged-over-nodes/phsp{phaseSpaceIndex}_merged.csv
-outputs/{seedBase}/merged-over-phsp/dose_merged.csv
-outputs/{seedBase}/dose_with_uncertainty.csv
+outputs/{seedBase}/latest_collection.txt
+outputs/{seedBase}/{timestamp}/collect_manifest.tsv
+outputs/{seedBase}/{timestamp}/merged-over-nodes/phsp{phaseSpaceIndex}_merged.csv
+outputs/{seedBase}/{timestamp}/merged-over-phsp/dose_merged.csv
+outputs/{seedBase}/{timestamp}/dose_with_uncertainty.csv
 ```
 
 - Primary final outputs are `merged-over-phsp/dose_merged.csv` and `dose_with_uncertainty.csv`.
 - `dose_with_uncertainty.csv` keeps the final summed `dose_to_medium_Gy` and reports `relative_uncertainty_percent` relative to that summed dose:
   `100 * standard_uncertainty_Gy / dose_to_medium_Gy`.
 - This uncertainty is for the summed dose, not the standard error of an arithmetic mean dose.
+
+## Recollection policy
+
+- Collect always reads from the existing `runs/{seedBase}/` folder.
+- Each collect attempt writes to a new timestamped folder: `outputs/{seedBase}/{timestamp}/`.
+- Previous collection folders are retained for audit and comparison and are never overwritten.
+- `outputs/{seedBase}/latest_collection.txt` points to the most recent collection folder.
+- Recollection is expected when merge logic or uncertainty logic changes.
 
 ## Build, run, test
 
@@ -143,17 +153,24 @@ Start here for onboarding:
 
 - `docs/onboarding.md`
 
-Behavior specifications:
+Workflow behaviour:
 
 - `docs/app-behaviour-spec.md`
 - `docs/generate-behaviour-spec.md`
 - `docs/run-behaviour-spec.md`
 - `docs/collect-behaviour-spec.md`
 
-UX and engineering style:
+UX and client flow:
 
-- `docs/generate-wizard-ux-spec.md`
+- `docs/wizard-ux-flow-spec.md`
+
+Engineering style:
+
 - `docs/safe-light-fsharp-doctrine.md`
+
+Operations and deployment:
+
+- `docs/how-to-deploy.md`
 
 Testing:
 

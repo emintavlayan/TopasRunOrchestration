@@ -17,8 +17,7 @@ let initialCollectModel () : CollectModel = {
 
 /// Returns true when a collect batch row is selectable.
 let isCollectBatchSelectable (batch: Shared.CollectBatchSummary) : bool =
-    not (System.String.Equals(batch.CollectStatus, "Collected", System.StringComparison.OrdinalIgnoreCase))
-    && batch.GeneratedRunCount > 0
+    batch.GeneratedRunCount > 0
 
 /// Returns true when collect batch selection can proceed.
 let canProceedCollectBatchSelection (collect: CollectModel) : bool =
@@ -47,7 +46,10 @@ let collectPrimaryButtonText (collect: CollectModel) : string =
     | CollectWelcome, _ -> "Start"
     | CollectSelectBatch, _ -> "Next"
     | CollectPreflightReview, _ -> "Next"
-    | CollectMergeReview, _ -> "Collect"
+    | CollectMergeReview, _ ->
+        match collect.Preview with
+        | Loaded preview when preview.HasCollectedBefore -> "Collect again"
+        | _ -> "Collect"
     | CollectResult, _ -> "Back to Collect"
 
 /// Returns true when collect primary action should be disabled.

@@ -107,12 +107,12 @@ Primary actions:
 
 - Welcome: `Start`
 - Batch/Preflight: `Next`
-- Review: `Collect` (or `Collecting...` while loading)
+- Review: `Collect` or `Collect again` (or `Collecting...` while loading)
 - Result: `Back to Collect`
 
 Behavior:
 
-- Batch step allows selecting only collect-eligible batches.
+- Batch step allows selecting any batch with generated runs, including batches collected before.
 - Preflight shows:
   - checks table
   - file issue table (run, phase-space, node, kind, problem, message)
@@ -122,6 +122,7 @@ Behavior:
   - `Skip failed nodes`
 - Selecting one exclusion mode clears the other mode.
 - Review and collect run against effective rows after exclusions.
+- Review shows a neutral info block when the batch has already been collected, including the latest collection folder and a note that recollection creates a new timestamped folder under `outputs/{seedBase}/`.
 - Collect action is disabled when `CanCollect = false`.
 - Duplicate collect submissions are blocked while loading.
 - Cancel resets Collect wizard state.

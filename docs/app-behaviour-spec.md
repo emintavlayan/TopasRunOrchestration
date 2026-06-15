@@ -22,7 +22,8 @@ SQLite stores orchestration metadata (not large simulation files):
 - generated batch metadata
 - generated run metadata
 - run submission metadata
-- collect metadata and output pointers
+- latest collect metadata and output pointers
+- collect history rows for timestamped recollection attempts
 
 Files remain on disk under `AppRoot`.
 
@@ -32,7 +33,7 @@ Files remain on disk under `AppRoot`.
 templates/   TOPAS source fragments/components
 inputs/      generated TOPAS inputs per seed base
 runs/        run artifacts and TOPAS CSV/log outputs
-outputs/     collect output files
+outputs/     timestamped collect output files plus latest_collection markers
 database/    SQLite database
 logs/        application logs
 ```
@@ -50,6 +51,7 @@ Generate and Run perform preflight/collision checks before committing state.
 - Generate is all-or-nothing on collision failures.
 - Run blocks double-submit and preflight failures.
 - Collect blocks when required CSV/log health checks fail or remaining rows are unbalanced.
+- Collect recollection is allowed and writes a new timestamped output folder instead of overwriting prior results.
 
 Collect preflight success requires:
 
@@ -77,5 +79,5 @@ Collect preflight success requires:
 ## Not implemented
 
 - History/batch-browser UI remains minimal.
-- No collect overwrite/recollect flow in first version.
+- No manual collect workflow for choosing an arbitrary existing output folder yet.
 - No run rerun/overwrite in first version.

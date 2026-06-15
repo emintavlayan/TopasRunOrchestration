@@ -55,7 +55,7 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
                                     Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Phase-spaces" ]
                                     Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Run status" ]
                                     Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Collect status" ]
-                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Final merged dose path" ]
+                                    Html.th [ prop.className "border-b border-base-300 px-3 py-2 text-left font-semibold"; prop.text "Latest collection folder" ]
                                 ]
                             ]
                             Html.tbody [
@@ -86,7 +86,7 @@ let viewCollectBatchSelection (collect: CollectModel) (dispatch: Msg -> unit) =
                                             Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text $"{batch.PhaseSpaceCount}" ]
                                             Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text (defaultArg batch.RunStatus "-") ]
                                             Html.td [ prop.className "border-b border-base-200 px-3 py-2"; prop.text batch.CollectStatus ]
-                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2 break-all"; prop.text (defaultArg batch.CollectSummaryPath "-") ]
+                                            Html.td [ prop.className "border-b border-base-200 px-3 py-2 break-all"; prop.text (defaultArg batch.LatestCollectionFolder "-") ]
                                         ]
                                     ]
                             ]
@@ -261,6 +261,7 @@ let viewCollectMergeReview (collect: CollectModel) =
     match collect.Preview with
     | Loaded preview ->
         let uncertaintyPath = joinDisplayPath [ preview.OutputFolder; "dose_with_uncertainty.csv" ]
+        let collectionRootFolder = joinDisplayPath [ "outputs"; preview.SeedBase ]
 
         Html.div [
             prop.className "space-y-3 text-sm text-base-content/80"
@@ -275,6 +276,23 @@ let viewCollectMergeReview (collect: CollectModel) =
                         ]
                     ]
                 | _ -> Html.none
+                if preview.HasCollectedBefore then
+                    Html.div [
+                        prop.className "alert alert-info"
+                        prop.children [
+                            Html.div [
+                                prop.className "space-y-1"
+                                prop.children [
+                                    Html.p "This run has already been collected."
+                                    Html.p "Collecting again will not overwrite previous outputs."
+                                    Html.p $"A new timestamped output folder will be created under {collectionRootFolder}/."
+                                    Html.p $"Latest collection: {defaultArg preview.LatestCollectionFolder "-"}"
+                                ]
+                            ]
+                        ]
+                    ]
+                else
+                    Html.none
                 Html.p $"Output folder: {preview.OutputFolder}"
                 Html.p $"Manifest: {preview.ManifestPath}"
                 Html.p $"Final merged dose: {preview.FinalSummaryPath}"
