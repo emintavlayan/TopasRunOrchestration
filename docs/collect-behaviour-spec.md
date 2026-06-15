@@ -142,8 +142,8 @@ Important rule:
 For each voxel and raw batch dose value `D_i`:
 
 - `m = number of raw batch files`
-- `S1 = Σ D_i`
-- `S2 = Σ D_i^2`
+- `S1 = sum of D_i`
+- `S2 = sum of D_i^2`
 - `dose_to_medium_Gy = S1`
 - `sample_variance_batch = (S2 - (S1 * S1 / m)) / (m - 1)`
 - `batch_standard_deviation = sqrt(max(0.0, sample_variance_batch))`
@@ -177,6 +177,38 @@ Interpretation:
 
 - `dose_to_medium_Gy` remains the summed dose `S1`
 - `standard_uncertainty_Gy` is the one-sigma uncertainty of the summed dose, not of the batch mean
+- `relative_uncertainty_percent` is relative to the final summed `dose_to_medium_Gy`, not to the batch mean
+- equivalently: `relative_uncertainty_percent = 100.0 * standard_uncertainty_Gy / dose_to_medium_Gy`
+
+## Summed dose versus mean dose
+
+Current output semantics:
+
+- the final dose distribution is the summed dose over the independent batch results
+- therefore the uncertainty target is the summed dose
+- the correct Type A uncertainty is `u(D_sum) = sqrt(m) * s`
+- the correct relative uncertainty is `100.0 * u(D_sum) / D_sum`
+
+If output semantics were later changed to arithmetic mean dose instead:
+
+- the dose target would become `D_mean = S1 / m`
+- the correct Type A uncertainty would become `u(D_mean) = s / sqrt(m)`
+- the relative uncertainty would remain numerically the same only if both numerator and denominator were changed consistently
+
+This distinction matters because using `s / sqrt(m)` while still reporting `D_sum = S1` would understate the uncertainty of the summed dose by a factor of `m`.
+
+## Uncertainty scope
+
+The reported uncertainty is:
+
+- Type A statistical uncertainty from the independent downstream simulations used in Collect
+
+The reported uncertainty is not a full estimate of:
+
+- Type B or model uncertainties from geometry, source model, transport settings, or cross sections
+- latent variance risk from finite pre-simulated Varian phase-space source files
+
+Because the source is a pre-simulated phase-space file, latent variance can remain even when downstream statistical uncertainty appears small.
 
 ## Collect operation behavior
 

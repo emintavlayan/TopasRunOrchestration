@@ -14,7 +14,7 @@ At a high level:
 
 - `Generate` builds TOPAS input files from selected templates, nodes, and phase-space files.
 - `Run` prepares Slurm manifest/script files and submits the batch with `sbatch`.
-- `Collect` reads TOPAS CSV/log outputs, merges node outputs per phase-space, and computes final dose statistics.
+- `Collect` reads TOPAS CSV/log outputs, merges node outputs per phase-space, merges the phase-space totals into a final summed dose grid, and computes Type A statistical uncertainty on that summed dose.
 
 ## Runtime model
 
@@ -91,11 +91,15 @@ srun --nodes=1 --ntasks=1 --nodelist="$NODE_NAME" "$TOPAS" "$INPUT_FILE" > "$LOG
 
 ```text
 outputs/{seedBase}/collect_manifest.tsv
-outputs/{seedBase}/phsp{phaseSpaceIndex}_merged.csv
-outputs/{seedBase}/dose_summary.csv
+outputs/{seedBase}/merged-over-nodes/phsp{phaseSpaceIndex}_merged.csv
+outputs/{seedBase}/merged-over-phsp/dose_merged.csv
+outputs/{seedBase}/dose_with_uncertainty.csv
 ```
 
-- Final summary includes `mean`, `median`, `standard_deviation`, `count`.
+- Primary final outputs are `merged-over-phsp/dose_merged.csv` and `dose_with_uncertainty.csv`.
+- `dose_with_uncertainty.csv` keeps the final summed `dose_to_medium_Gy` and reports `relative_uncertainty_percent` relative to that summed dose:
+  `100 * standard_uncertainty_Gy / dose_to_medium_Gy`.
+- This uncertainty is for the summed dose, not the standard error of an arithmetic mean dose.
 
 ## Build, run, test
 

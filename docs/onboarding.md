@@ -35,7 +35,7 @@ Then open the client URL shown by the server.
 
 1. Generate: create one batch (`seedBase`) and input files.
 2. Run: preflight, preview Slurm script, submit with `sbatch`.
-3. Collect: preflight outputs, merge over nodes, merge over phase-space files, compute raw-batch uncertainty.
+3. Collect: preflight outputs, merge over nodes, merge over phase-space files, compute Type A uncertainty of the final summed dose.
 
 ## 5. Key runtime folders
 
