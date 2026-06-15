@@ -262,6 +262,7 @@ let viewCollectMergeReview (collect: CollectModel) =
     | Loaded preview ->
         let uncertaintyPath = joinDisplayPath [ preview.OutputFolder; "dose_with_uncertainty.csv" ]
         let collectionRootFolder = joinDisplayPath [ "outputs"; preview.SeedBase ]
+        let latestCollectionFolder = defaultArg preview.LatestCollectionFolder "-"
 
         Html.div [
             prop.className "space-y-3 text-sm text-base-content/80"
@@ -286,7 +287,7 @@ let viewCollectMergeReview (collect: CollectModel) =
                                     Html.p "This run has already been collected."
                                     Html.p "Collecting again will not overwrite previous outputs."
                                     Html.p $"A new timestamped output folder will be created under {collectionRootFolder}/."
-                                    Html.p $"Latest collection: {defaultArg preview.LatestCollectionFolder "-"}"
+                                    Html.p $"Latest collection: {latestCollectionFolder}"
                                 ]
                             ]
                         ]

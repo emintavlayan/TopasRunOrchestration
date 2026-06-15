@@ -171,6 +171,7 @@ Engineering style:
 Operations and deployment:
 
 - `docs/how-to-deploy.md`
+- `docs/systemd-deployment.md`
 
 Testing:
 
